@@ -1,6 +1,6 @@
 [gd_scene load_steps=4 format=3 uid="uid://dl2k1ph046i2p"]
 
-[ext_resource type="Script" path="res://prefab/panel.gd" id="1_cnt15"]
+[ext_resource type="Script" path="res://prefab/input_window.gd" id="1_cnt15"]
 
 [sub_resource type="InputEventKey" id="InputEventKey_1ikxv"]
 device = -1

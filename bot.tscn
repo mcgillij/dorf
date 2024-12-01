@@ -1,9 +1,45 @@
-[gd_scene load_steps=5 format=3 uid="uid://l735hkmnjjh5"]
+[gd_scene load_steps=9 format=3 uid="uid://l735hkmnjjh5"]
 
 [ext_resource type="Script" path="res://bot.gd" id="1_6e6p7"]
 [ext_resource type="PackedScene" uid="uid://dl2k1ph046i2p" path="res://prefab/text_input_window.tscn" id="2_4qqjq"]
 [ext_resource type="Script" path="res://addons/awaitable_http_request/awaitable_http_request.gd" id="2_noa4f"]
 [ext_resource type="Texture2D" uid="uid://dv56mrtgkaj11" path="res://assets/images/dorf.png" id="3_pbiqb"]
+[ext_resource type="Texture2D" uid="uid://cxqgy3hyso5ks" path="res://assets/images/dorf_talking.png" id="5_it7v2"]
+[ext_resource type="Texture2D" uid="uid://byuegm6l8lsg4" path="res://assets/images/dorf_thinking.png" id="6_dfvr4"]
+[ext_resource type="Script" path="res://animated_sprite_2d.gd" id="7_evtps"]
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_sibk1"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("3_pbiqb")
+}],
+"loop": true,
+"name": &"idle",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("5_it7v2")
+}, {
+"duration": 1.0,
+"texture": ExtResource("3_pbiqb")
+}],
+"loop": true,
+"name": &"talking",
+"speed": 5.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("3_pbiqb")
+}, {
+"duration": 1.0,
+"texture": ExtResource("6_dfvr4")
+}],
+"loop": true,
+"name": &"thinking",
+"speed": 5.0
+}]
 
 [node name="Bot" type="Control" node_paths=PackedStringArray("http")]
 layout_mode = 3
@@ -15,17 +51,23 @@ input_window = ExtResource("2_4qqjq")
 [node name="AwaitableHTTPRequest" type="HTTPRequest" parent="."]
 script = ExtResource("2_noa4f")
 
-[node name="DORF" type="TextureButton" parent="."]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(256, 256)
-layout_mode = 2
-offset_right = 256.0
-offset_bottom = 256.0
-texture_normal = ExtResource("3_pbiqb")
-ignore_texture_size = true
-stretch_mode = 5
-
 [node name="TextInputWindow" parent="." instance=ExtResource("2_4qqjq")]
+position = Vector2i(-172, -22)
 visible = false
+always_on_top = true
 
-[connection signal="pressed" from="DORF" to="." method="_on_texture_rect_pressed"]
+[node name="dorf" type="AnimatedSprite2D" parent="."]
+unique_name_in_owner = true
+position = Vector2(128, 128)
+scale = Vector2(0.25, 0.25)
+sprite_frames = SubResource("SpriteFrames_sibk1")
+animation = &"idle"
+script = ExtResource("7_evtps")
+
+[node name="Timer" type="Timer" parent="."]
+wait_time = 2.0
+one_shot = true
+
+[connection signal="request_completed" from="AwaitableHTTPRequest" to="." method="_on_awaitable_http_request_request_completed"]
+[connection signal="request_finished" from="AwaitableHTTPRequest" to="." method="_on_awaitable_http_request_request_finished"]
+[connection signal="timeout" from="Timer" to="." method="_on_timer_timeout"]
