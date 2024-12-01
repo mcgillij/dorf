@@ -118,13 +118,11 @@ func dorf_clicked() -> void:
 
 func _on_awaitable_http_request_request_completed(result: int, response_code: int, headers: PackedStringArray, body: PackedByteArray) -> void:
 	var string = body.get_string_from_ascii()
-
-
 	timer.start()
 	var json_result = JSON.parse_string(string)
 	var result_string := extract_content(json_result)
 	thread = Thread.new()
-	thread.start(run_system_command.bind(result_string))
+	thread.start(run_system_command.bind(result_string), Thread.PRIORITY_HIGH)
 
 func _exit_tree():
 	thread.wait_to_finish()

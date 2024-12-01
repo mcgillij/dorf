@@ -65,7 +65,7 @@ animation = &"idle"
 script = ExtResource("7_evtps")
 
 [node name="Timer" type="Timer" parent="."]
-wait_time = 2.0
+wait_time = 6.0
 one_shot = true
 
 [connection signal="request_completed" from="AwaitableHTTPRequest" to="." method="_on_awaitable_http_request_request_completed"]
