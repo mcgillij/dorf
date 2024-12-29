@@ -91,9 +91,7 @@ redis_client = redis.Redis(host='0.0.0.0', port=6379, decode_responses=True)  # 
 
 @bot.command()
 async def derf(ctx, *, message):
-    # Add the command to the Redis queue
-    # Create a unique identifier for the combination of guild and channel
-    unique_id = hashlib.md5(f"{ctx.guild.id}^{ctx.channel.id}^{ctx.author.id}".encode()).hexdigest()
+    unique_id = hashlib.md5(f"{ctx.guild.id}^{ctx.channel.id}^{ctx.author.id}^{message}".encode()).hexdigest()
     print(f"Unique ID: {unique_id}")
     # Store the ctx object in the dictionary
     if unique_id not in context_dict:
@@ -130,15 +128,46 @@ async def process_redis_queue():
             ctx = context_dict[unique_id]
 
             text_response = derf_bot.get_response(message)
+            # Split the text response into chunks if it exceeds the limit
+            split_responses = split_message(text_response, 2000)
 
-            if ctx.channel:
-                await ctx.channel.send(text_response)
+            # Send each chunk as a separate message
+            for response in split_responses:
+                if ctx.channel:
+                    await ctx.channel.send(response)
 
             # Play audio in the Discord voice channel
             await derf_bot.mimic_and_play(ctx, text_response)
 
         except Exception as e:
             print(f"An error occurred while processing queue: {e}")
+
+
+def split_message(message, max_length=2000):
+    """
+    Split a message into chunks that fit within the specified character limit.
+    
+    :param message: The original message to be split.
+    :param max_length: The maximum length of each chunk.
+    :return: A list of message chunks.
+    """
+    if len(message) <= max_length:
+        return [message]
+    
+    chunks = []
+    while message:
+        # Find a suitable place to split the message
+        end_index = min(max_length, len(message))
+        while end_index > 0 and message[end_index] != ' ':
+            end_index -= 1
+        
+        if end_index == 0:  # If no space found, split at max_length
+            end_index = max_length
+        
+        chunks.append(message[:end_index])
+        message = message[end_index:]
+    
+    return chunks
 
 # Run the bot with your token
 bot.run(os.getenv("DISCORD_BOT_TOKEN", ""))
