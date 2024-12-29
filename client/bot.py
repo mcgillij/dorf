@@ -5,7 +5,9 @@ import discord
 from discord.ext import commands
 from pydub import AudioSegment
 import asyncio
-import io
+import redis
+import hashlib
+
 # Constants for API interaction
 AUTH_TOKEN = os.getenv("AUTH_TOKEN")
 WORKSPACE = "a-new-workspace"
@@ -13,6 +15,8 @@ SESSION_ID = "identifier-to-partition-chats-by-external-id"
 INTENTS = discord.Intents.default()
 INTENTS.message_content = True
 INTENTS.voice_states = True
+
+context_dict = {}
 
 # Create the bot instance with a command prefix
 bot = commands.Bot(command_prefix='!', intents=INTENTS)
@@ -24,7 +28,7 @@ class DerfBot:
         self.session_id = session_id
 
     def get_response(self, message):
-        url = f"http://localhost:3001/api/v1/workspace/test/chat"
+        url = f"http://localhost:3001/api/v1/workspace/{WORKSPACE}/chat"
         headers = {
             'accept': 'application/json',
             'Authorization': f'Bearer {self.auth_token}',
@@ -78,104 +82,24 @@ class DerfBot:
         except Exception as e:
             print(f"Error playing audio in the Discord voice channel: {e}")
             await ctx.send("An error occurred while playing audio. Please try again later.")
-    # async def mimic_and_play(self, ctx, text_response):
-        # if not text_response:
-            # await ctx.send("No valid text to convert to audio.")
-            # return
 
-        # try:
-            # # Generate audio with mimic3 and save it to a file
-            # os.system(f'mimic3 --output-naming id --output-dir=/home/j/dorf/client/output/ --csv "1|{text_response}"')
 
-            # # Load the generated WAV file into an AudioSegment object
-            # audio_segment = AudioSegment.from_wav("/home/j/dorf/client/output/1.wav")
-
-            # # Convert the AudioSegment to Opus format for Discord
-            # opus_data = io.BytesIO()
-            # audio_segment.export(opus_data, format="opus")
-            # opus_data.seek(0)
-
-            # # Play the audio in the Discord voice channel
-            # if ctx.author.voice:
-                # vc = await ctx.author.voice.channel.connect()
-                # vc.play(discord.FFmpegOpusAudio(source=opus_data), after=lambda e: print(f'Player error: {e}') if e else None)
-                
-                # while vc.is_playing() or vc.is_paused():
-                    # await asyncio.sleep(0.1)
-                
-                # await vc.disconnect()
-            # else:
-                # await ctx.send("You are not connected to a voice channel.")
-        # except Exception as e:
-            # print(f"Error playing audio in the Discord voice channel: {e}")
-            # await ctx.send("An error occurred while playing audio. Please try again later.")
-    # async def mimic_and_play(self, ctx, text_response):
-            # if not text_response:
-                # await ctx.send("No valid text to convert to audio.")
-                # return
-
-            # try:
-                # # Generate audio with mimic3 and save it to a file
-                # os.system(f'mimic3 --output-naming id --output-dir=/home/j/dorf/client/output/ --csv "1|{text_response}"')
-
-                # # Load the generated WAV file into an AudioSegment object
-                # audio_segment = AudioSegment.from_wav("/home/j/dorf/client/output/1.wav")
-
-                # # Convert the AudioSegment to PCM format for Discord
-                # pcm_data = io.BytesIO()
-                # audio_segment.export(pcm_data, format="pcm_s16_be")
-                # pcm_data.seek(0)
-
-                # # Play the audio in the Discord voice channel
-                # if ctx.author.voice:
-                    # vc = await ctx.author.voice.channel.connect()
-                    # vc.play(discord.FFmpegPCMAudio(pcm_data), after=lambda e: print(f'Player error: {e}') if e else None)
-                    
-                    # while vc.is_playing() or vc.is_paused():
-                        # await asyncio.sleep(0.1)
-                    
-                    # await vc.disconnect()
-                # else:
-                    # await ctx.send("You are not connected to a voice channel.")
-            # except Exception as e:
-                # print(f"Error playing audio in the Discord voice channel: {e}")
-                # await ctx.send("An error occurred while playing audio. Please try again later.")
-    # async def mimic_and_play(self, ctx, text_response):
-        # if not text_response:
-            # await ctx.send("No valid text to convert to audio.")
-            # return
-
-        # try:
-            # # Run the mimic3 command and capture its output
-            # result = os.popen(f'mimic3 --stdout "{text_response}"').read()
-            
-            # # Convert the output to an AudioSegment (assuming it's in WAV format)
-            # audio_segment = AudioSegment.from_file(io.BytesIO(result), format='wav')
-            
-            # # Play the audio in the Discord voice channel
-            # if ctx.author.voice:
-                # vc = await ctx.author.voice.channel.connect()
-                # vc.play(discord.FFmpegPCMAudio(audio_segment.export(format="mp3")))
-                # while vc.is_playing():
-                    # await asyncio.sleep(1)
-                # await vc.disconnect()
-            # else:
-                # await ctx.send("You are not connected to a voice channel.")
-        # except Exception as e:
-            # print(f"Error playing audio in the Discord voice channel: {e}")
-            # await ctx.send("An error occurred while playing audio. Please try again later.")
-
-# Create an instance of DerfBot
 derf_bot = DerfBot(AUTH_TOKEN, WORKSPACE, SESSION_ID)
+
+# Initialize Redis client
+redis_client = redis.Redis(host='0.0.0.0', port=6379, decode_responses=True)  # Use the container name here
 
 @bot.command()
 async def derf(ctx, *, message):
-    text_response = derf_bot.get_response(message)
-    await ctx.send("Here is the response from the API:")
-    await ctx.send(text_response)
-    
-    # Optionally play audio if needed
-    await derf_bot.mimic_and_play(ctx, text_response)
+    # Add the command to the Redis queue
+    # Create a unique identifier for the combination of guild and channel
+    unique_id = hashlib.md5(f"{ctx.guild.id}^{ctx.channel.id}^{ctx.author.id}".encode()).hexdigest()
+    print(f"Unique ID: {unique_id}")
+    # Store the ctx object in the dictionary
+    if unique_id not in context_dict:
+        context_dict[unique_id] = ctx
+    # Add the command with context to the Redis queue
+    redis_client.lpush('derf_queue', f"{unique_id}:{message}")
 
 # Event listener for when the bot has switched from offline to online.
 @bot.event
@@ -183,6 +107,38 @@ async def on_ready():
     print(f'Logged in as {bot.user.name}')
     print('------')
 
+    # Start the Redis queue processing task
+    asyncio.create_task(process_redis_queue())
+
+async def process_redis_queue():
+    while True:
+        try:
+            message_with_context = redis_client.rpop('derf_queue')
+            if message_with_context is None:
+                await asyncio.sleep(1)  # Wait a bit before checking again
+                continue
+
+            # Parse the unique identifier and message from the queue item
+            unique_id, message = message_with_context.split(":", 1)
+            print(f"Processing message: {message} for {unique_id}")
+            
+            # Retrieve the ctx object from the dictionary
+            if unique_id not in context_dict:
+                print(f"No context found for {unique_id}")
+                continue
+            
+            ctx = context_dict[unique_id]
+
+            text_response = derf_bot.get_response(message)
+
+            if ctx.channel:
+                await ctx.channel.send(text_response)
+
+            # Play audio in the Discord voice channel
+            await derf_bot.mimic_and_play(ctx, text_response)
+
+        except Exception as e:
+            print(f"An error occurred while processing queue: {e}")
+
 # Run the bot with your token
 bot.run(os.getenv("DISCORD_BOT_TOKEN", ""))
-
