@@ -11,6 +11,7 @@ import dotenv
 from typing import List
 import traceback
 import logging
+import json
 import aiohttp
 from random import randint
 
@@ -34,6 +35,58 @@ bot = commands.Bot(command_prefix='!', intents=INTENTS)
 # Initialize Redis client
 redis_client = redis.Redis(host='0.0.0.0', port=6379, decode_responses=True)
 
+timeout = aiohttp.ClientTimeout(total=20)
+
+async def process_response_queue():
+    """
+    Continuously process requests for get_response from Redis queue.
+    """
+    while True:
+        try:
+            task_data = redis_client.rpop('response_queue')
+            if not task_data:
+                await asyncio.sleep(1)
+                continue
+
+            # Parse task data
+            task = json.loads(task_data)
+            unique_id = task['unique_id']
+            message = task['message']
+
+            # Call get_response
+            response = await derf_bot.get_response(message)
+
+            # Store the response in Redis for retrieval
+            redis_client.set(f"response:{unique_id}", response)
+        except Exception as e:
+            print(f"Error processing response queue: {e}")
+            traceback.print_exc()
+
+async def process_summarizer_queue():
+    """
+    Continuously process requests for get_summarizer_response from Redis queue.
+    """
+    while True:
+        try:
+            task_data = redis_client.rpop('summarizer_queue')
+            if not task_data:
+                await asyncio.sleep(1)
+                continue
+
+            # Parse task data
+            task = json.loads(task_data)
+            unique_id = task['unique_id']
+            message = task['message']
+
+            # Call get_summarizer_response
+            response = await derf_bot.get_summarizer_response(message)
+
+            # Store the response in Redis for retrieval
+            redis_client.set(f"summarizer:{unique_id}", response)
+        except Exception as e:
+            print(f"Error processing summarizer queue: {e}")
+            traceback.print_exc()
+
 class DerfBot:
     def __init__(self, auth_token: str, workspace: str, session_id: str):
         self.auth_token = auth_token
@@ -53,21 +106,21 @@ class DerfBot:
             "sessionId": randint(0, 1000000),
             "attachments": []
         }
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             try:
-                async with session.post(url, headers=headers, json=data, timeout=20) as response:
+                async with session.post(url, headers=headers, json=data) as response:
                     if response.status == 200:
                         json_response = await response.json()
                         return json_response.get("textResponse", "")
                     else:
                         print(f"Error: {response.status} - {await response.text()}")
                         return ""
-            except aiohttp.ClientTimeout:
+            except asyncio.TimeoutError:
                 print("Request timed out.")
                 return "The request timed out. Please try again later."
             except Exception as e:
                 print(f"Exception during API call: {e}")
-                return ""
+                return "An error occurred while processing the request. Please try again later."
 
     async def get_response(self, message: str) -> str:
         url = f"http://localhost:3001/api/v1/workspace/{self.workspace}/chat"
@@ -82,21 +135,22 @@ class DerfBot:
             "sessionId": self.session_id,
             "attachments": []
         }
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             try:
-                async with session.post(url, headers=headers, json=data, timeout=20) as response:
+                async with session.post(url, headers=headers, json=data) as response:
                     if response.status == 200:
                         json_response = await response.json()
                         return json_response.get("textResponse", "")
                     else:
                         print(f"Error: {response.status} - {await response.text()}")
                         return ""
-            except aiohttp.ClientTimeout:
+            except asyncio.TimeoutError:
                 print("Request timed out.")
                 return "The request timed out. Please try again later."
             except Exception as e:
                 print(f"Exception during API call: {e}")
-                return ""
+                traceback.print_exc()
+                return "An error occurred while processing the request. Please try again later."
 
 async def mimic_audio_task():
     """
@@ -139,9 +193,10 @@ async def mimic_audio_task():
                         format="opus",
                         parameters=["-b:a", "128k"]
                     )
-
-                # Push the processed audio back into Redis for playback
-                redis_client.lpush('playback_queue', f"{unique_id}|{opus_path}")
+                if os.path.exists(opus_path):
+                    redis_client.lpush('playback_queue', f"{unique_id}|{opus_path}")
+                else:
+                    print(f"Opus file does not exist: {opus_path}")
 
             finally:
                 # Clean up temporary files
@@ -227,33 +282,44 @@ async def derf(ctx, *, message: str):
     if unique_id not in context_dict:
         context_dict[unique_id] = ctx
 
-    # Get the bot's text response
-    text_response = await derf_bot.get_response(message)
-    if not text_response:
-        await ctx.send("Failed to fetch a response. Please try again.")
-        return
-    print(f"Response: {text_response}")
-    chunked_responses = split_message(text_response, 2000)
-    for response in chunked_responses:
-        await ctx.send(response)
-    #determine if the text is long enough to summarize
-    summarized = False
-    summary_response = ""
-    if len(text_response) > 1000:
-        summary_response = await derf_bot.get_summarizer_response(text_response)
-        if summary_response:
-            summarized = True
-            await ctx.send(f"Here is a summary of the response: {summary_response}")
+    # Queue the message for processing
+    redis_client.lpush('response_queue', json.dumps({"unique_id": unique_id, "message": message}))
 
-    if not summarized:
-        # Queue each line for audio processing
-        dialog_lines = text_response.strip().splitlines()
-        for idx, line in enumerate(dialog_lines, start=1):
-            redis_client.lpush('audio_queue', f"{unique_id}|{idx}|{line.strip()}")
+    # Poll Redis for the result
+    while True:
+        response = redis_client.get(f"response:{unique_id}")
+        if response:
+            if isinstance(response, bytes):
+                response = response.decode('utf-8')  # Decode if stored as bytes
+            redis_client.delete(f"response:{unique_id}")  # Clean up
+            break
+        await asyncio.sleep(0.5)
+
+    chunked_responses = split_message(response, 2000)
+    for response_chunk in chunked_responses:
+        await ctx.send(response_chunk)
+
+    # Check if the response is long and needs summarizing
+    if len(response) > 1000:
+        redis_client.lpush('summarizer_queue', json.dumps({"unique_id": unique_id, "message": response}))
+
+        # Poll Redis for the summarizer result
+        while True:
+            summary_response = redis_client.get(f"summarizer:{unique_id}")
+            if summary_response:
+                if isinstance(summary_response, bytes):
+                    summary_response = summary_response.decode('utf-8')  # Decode if stored as bytes
+                redis_client.delete(f"summarizer:{unique_id}")
+                await ctx.send(f"{summary_response}")
+                # Queue the summarized response for audio generation
+                for i in summary_response.split("\n"):
+                    redis_client.lpush('audio_queue', f"{unique_id}|{randint(1, 100000)}|{i}")
+                break
+            await asyncio.sleep(0.5)
     else:
-        dialog_lines = summary_response.strip().splitlines()
-        for idx, line in enumerate(dialog_lines, start=1):
-            redis_client.lpush('audio_queue', f"{unique_id}|{idx}|{line.strip()}")
+        # Queue the full response for audio generation
+        for j in response.split("\n"):
+            redis_client.lpush('audio_queue', f"{unique_id}|{randint(1, 100000)}|{j}")
 
 
 @bot.event
@@ -263,6 +329,8 @@ async def on_ready():
     asyncio.create_task(connect_to_voice_channel_on_ready())
     asyncio.create_task(mimic_audio_task())
     asyncio.create_task(playback_task())
+    asyncio.create_task(process_response_queue())
+    asyncio.create_task(process_summarizer_queue())
 
 async def connect_to_voice_channel_on_ready():
     guild_id = int(os.getenv("GUILD_ID", ""))
@@ -276,6 +344,8 @@ async def connect_to_voice_channel_on_ready():
                 print(f"Connected to voice channel: {voice_channel.name}")
             except discord.ClientException as e:
                 print(f"Already connected or error connecting: {e}")
+            except Exception as e:
+                print(f"Unexpected error connecting to voice channel: {e}")
         else:
             print("Voice channel not found.")
     else:
