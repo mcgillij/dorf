@@ -7,13 +7,15 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.13"
-requests = "^2.32.3"
 discord-py = "^2.4.0"
 redis = "^5.2.1"
-audioop-lts = "^0.2.1"
 pydub = "^0.25.1"
 pynacl = "^1.5.0"
 python-dotenv = "^1.0.1"
+pyaudio = "^0.2.14"
+wave = "^0.0.2"
+aiohttp = "^3.11.11"
+audioop-lts = "^0.2.1"
 
 
 [tool.poetry.group.dev.dependencies]
