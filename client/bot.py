@@ -167,6 +167,12 @@ async def mimic_audio_task():
             unique_id, line_number, line_text = task_data.split("|", 2)
             text_file_path = None
 
+            # Check the number of users in the voice channel
+            num_users = len(bot.voice_clients[0].channel.members) - 1 if bot.voice_clients else 0
+            if num_users < 1:
+                print(f"Skipping audio generation as there are only {num_users} users in the voice channel.")
+                continue
+
             try:
                 # Create temporary text file for the line
                 with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as text_file:
@@ -228,6 +234,12 @@ async def playback_task():
                 print("Voice client not connected.")
                 continue
 
+            # Check the number of users in the voice channel
+            num_users = len(voice_client.channel.members) - 1  # Subtract 1 for the bot itself
+            if num_users < 1:
+                print(f"Skipping playback as there are only {num_users} users in the voice channel.")
+                continue
+
             # Play the generated audio
             audio_source = await discord.FFmpegOpusAudio.from_probe(
                 opus_path, method='fallback', options='-vn -b:a 128k'
@@ -283,7 +295,7 @@ async def derf(ctx, *, message: str):
         context_dict[unique_id] = ctx
 
     # Queue the message for processing
-    redis_client.lpush('response_queue', json.dumps({"unique_id": unique_id, "message": message}))
+    redis_client.lpush('response_queue', json.dumps({"unique_id": unique_id, "message": f"{ctx.author.id}:{message}"}))
 
     # Poll Redis for the result
     while True:
@@ -299,6 +311,9 @@ async def derf(ctx, *, message: str):
     for response_chunk in chunked_responses:
         await ctx.send(response_chunk)
 
+    do_voice = len(ctx.guild.voice_client.channel.members) - 1 if ctx.guild.voice_client else 0
+    print(f"Number of users in voice channel: {do_voice}")
+
     # Check if the response is long and needs summarizing
     if len(response) > 1000:
         redis_client.lpush('summarizer_queue', json.dumps({"unique_id": unique_id, "message": response}))
@@ -312,14 +327,16 @@ async def derf(ctx, *, message: str):
                 redis_client.delete(f"summarizer:{unique_id}")
                 await ctx.send(f"{summary_response}")
                 # Queue the summarized response for audio generation
-                for i in summary_response.split("\n"):
-                    redis_client.lpush('audio_queue', f"{unique_id}|{randint(1, 100000)}|{i}")
+                if do_voice:
+                    for i in summary_response.split("\n"):
+                        redis_client.lpush('audio_queue', f"{unique_id}|{randint(1, 100000)}|{i}")
                 break
             await asyncio.sleep(0.5)
     else:
         # Queue the full response for audio generation
-        for j in response.split("\n"):
-            redis_client.lpush('audio_queue', f"{unique_id}|{randint(1, 100000)}|{j}")
+        if do_voice:
+            for j in response.split("\n"):
+                redis_client.lpush('audio_queue', f"{unique_id}|{randint(1, 100000)}|{j}")
 
 
 @bot.event
