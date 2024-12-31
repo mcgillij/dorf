@@ -4,69 +4,76 @@ from bot.utilities import split_message
 import redis
 import json
 import hashlib
-from random import randint
 import asyncio
+import os
 
+# Configure Redis
+REDIS_HOST = os.getenv("REDIS_HOST", "")
+REDIS_PORT = os.getenv("REDIS_PORT", "")
+redis_client = redis.Redis(host='0.0.0.0', port=6379, decode_responses=True)
 
-context_dict = {}
-
+# Configure bot and intents
 INTENTS = discord.Intents.default()
 INTENTS.message_content = True
 INTENTS.voice_states = True
-
-redis_client = redis.Redis(host='0.0.0.0', port=6379, decode_responses=True)
-
+INTENTS.members = True
 bot = commands.Bot(command_prefix='!', intents=INTENTS)
+
+LONG_RESPONSE_THRESHOLD = 1000
+# Context dictionary
+context_dict = {}
+
+# Helper functions
+def generate_unique_id(ctx, message: str) -> str:
+    """Generates a unique ID based on context and message."""
+    return hashlib.md5(f"{ctx.guild.id}^{ctx.channel.id}^{ctx.author.id}^{message}".encode()).hexdigest()
+
+async def poll_redis_for_key(key: str, timeout: float = 0.5) -> str:
+    """Polls Redis for a key and returns its value when found."""
+    while True:
+        response = redis_client.get(key)
+        if response:
+            redis_client.delete(key)
+            return response.decode('utf-8') if isinstance(response, bytes) else response
+        await asyncio.sleep(timeout)
+
+async def process_audio_queue(unique_id: str, messages: list[str], voice_user_count: int):
+    """Queues messages for audio generation if users are in the voice channel."""
+    if voice_user_count > 0:
+        index = 1
+        for msg in messages:
+            redis_client.lpush('audio_queue', f"{unique_id}|{index}|{msg}")
+            index += 1
 
 @bot.command()
 async def derf(ctx, *, message: str):
-    unique_id = hashlib.md5(f"{ctx.guild.id}^{ctx.channel.id}^{ctx.author.id}^{message}".encode()).hexdigest()
+    unique_id = generate_unique_id(ctx, message)
     print(f"Unique ID: {unique_id}")
 
-    # Store the ctx object in the dictionary
-    if unique_id not in context_dict:
-        context_dict[unique_id] = ctx
+    # Store the context if not already stored
+    context_dict.setdefault(unique_id, ctx)
 
     # Queue the message for processing
     redis_client.lpush('response_queue', json.dumps({"unique_id": unique_id, "message": f"{ctx.author.id}:{message}"}))
 
     # Poll Redis for the result
-    while True:
-        response = redis_client.get(f"response:{unique_id}")
-        if response:
-            if isinstance(response, bytes):
-                response = response.decode('utf-8')  # Decode if stored as bytes
-            redis_client.delete(f"response:{unique_id}")  # Clean up
-            break
-        await asyncio.sleep(0.5)
+    response = await poll_redis_for_key(f"response:{unique_id}")
 
-    chunked_responses = split_message(response, 2000)
-    for response_chunk in chunked_responses:
+    # Send the response in chunks
+    for response_chunk in split_message(response, 2000):
         await ctx.send(response_chunk)
 
-    do_voice = len(ctx.guild.voice_client.channel.members) - 1 if ctx.guild.voice_client else 0
-    print(f"Number of users in voice channel: {do_voice}")
+    # Check for voice channel users
+    voice_user_count = len(ctx.guild.voice_client.channel.members) - 1 if ctx.guild.voice_client else 0
+    print(f"Number of users in voice channel: {voice_user_count}")
 
-    # Check if the response is long and needs summarizing
-    if len(response) > 1000:
+    # Summarize response if it's long
+    if len(response) > LONG_RESPONSE_THRESHOLD:
         redis_client.lpush('summarizer_queue', json.dumps({"unique_id": unique_id, "message": response}))
+        summary_response = await poll_redis_for_key(f"summarizer:{unique_id}")
 
-        # Poll Redis for the summarizer result
-        while True:
-            summary_response = redis_client.get(f"summarizer:{unique_id}")
-            if summary_response:
-                if isinstance(summary_response, bytes):
-                    summary_response = summary_response.decode('utf-8')  # Decode if stored as bytes
-                redis_client.delete(f"summarizer:{unique_id}")
-                await ctx.send(f"{summary_response}")
-                # Queue the summarized response for audio generation
-                if do_voice:
-                    for i in summary_response.split("\n"):
-                        redis_client.lpush('audio_queue', f"{unique_id}|{randint(1, 100000)}|{i}")
-                break
-            await asyncio.sleep(0.5)
+        await ctx.send(summary_response)
+        await process_audio_queue(unique_id, summary_response.split("\n"), voice_user_count)
     else:
-        # Queue the full response for audio generation
-        if do_voice:
-            for j in response.split("\n"):
-                redis_client.lpush('audio_queue', f"{unique_id}|{randint(1, 100000)}|{j}")
+        await process_audio_queue(unique_id, response.split("\n"), voice_user_count)
+

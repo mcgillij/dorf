@@ -1,17 +1,14 @@
 import os
 import discord
 from bot.commands import bot
-# import dotenv
-
-# dotenv.load_dotenv()
 
 async def connect_to_voice_channel_on_ready():
-    print("Connecting to voice channel...")
     guild_id = int(os.getenv("GUILD_ID", ""))
-    print(f"Guild ID: {guild_id}")
+    #print(f"Guild ID: {guild_id}")
     voice_channel_id = int(os.getenv("VOICE_CHANNEL_ID", ""))
-    print(f"Voice Channel ID: {voice_channel_id}")
+    #print(f"Voice Channel ID: {voice_channel_id}")
     guild = discord.utils.get(bot.guilds, id=guild_id)
+    print("Connecting to voice channel...")
     if guild:
         voice_channel = discord.utils.get(guild.voice_channels, id=voice_channel_id)
         if voice_channel:
