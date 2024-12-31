@@ -1,11 +1,14 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, voice_recv
+from discord.ext.voice_recv import VoiceData
 from bot.utilities import split_message, split_text
 import redis
 import json
 import hashlib
 import asyncio
 import os
+import numpy as np
+import wave
 
 # Configure Redis
 REDIS_HOST = os.getenv("REDIS_HOST", "")
@@ -77,3 +80,102 @@ async def derf(ctx, *, message: str):
     else:
         await process_audio_queue(unique_id, split_text(response), voice_user_count)
 
+class AudioCapture(voice_recv.AudioSink):
+    """
+    A custom audio sink to capture and save audio per user.
+    """
+    def __init__(self, output_dir="audio"):
+        self.output_dir = output_dir
+        self.user_audio_data = {}
+
+        # Ensure the output directory exists
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
+
+    def write(self, member, data: VoiceData):
+        """
+        Collects PCM audio data for each user.
+        Args:
+            member: The user whose audio is being processed.
+            data: The VoiceData object containing PCM audio.
+        """
+        pcm_bytes = data.pcm  # Extract the raw PCM data from VoiceData
+        if member.id not in self.user_audio_data:
+            self.user_audio_data[member.id] = []
+        self.user_audio_data[member.id].append(pcm_bytes)
+
+    def save(self):
+        """
+        Saves captured audio for each user to separate .wav files.
+        """
+        if not self.user_audio_data:
+            print("No audio data to save.")
+            return
+
+        for user_id, audio_data in self.user_audio_data.items():
+            if not audio_data:
+                print(f"No audio data for user {user_id}.")
+                continue
+
+            pcm_data = b"".join(audio_data)
+            np_data = np.frombuffer(pcm_data, dtype=np.int16)
+
+            output_path = os.path.join(self.output_dir, f"{user_id}.wav")
+            with wave.open(output_path, "wb") as wav_file:
+                wav_file.setnchannels(2)  # stereo
+                wav_file.setsampwidth(2)  # 16-bit PCM
+                wav_file.setframerate(48000)  # Discord uses 48kHz sample rate
+                wav_file.writeframes(np_data.tobytes())
+
+            print(f"Saved audio for user {user_id} to {output_path}.")
+
+    def cleanup(self):
+        """
+        Clean up resources if needed.
+        """
+        pass
+
+    def wants_opus(self):
+        """
+        Return False because we want PCM audio data, not Opus.
+        """
+        return False
+
+@bot.command()
+async def capture(ctx):
+    """
+    Starts capturing audio for all users in the voice channel.
+    """
+    if not ctx.author.voice:
+        await ctx.send("You must be in a voice channel to use this command.")
+        return
+
+    voice_channel = ctx.author.voice.channel
+    vc = ctx.guild.voice_client
+
+    if not vc:
+        vc = await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
+
+    if vc.is_listening():
+        await ctx.send("Already capturing audio.")
+        return
+
+    audio_sink = AudioCapture(output_dir="user_audio")
+    vc.listen(audio_sink)
+
+    await ctx.send("Recording started. Use `!stopcapture` to stop and save the audio.")
+
+@bot.command()
+async def stop(ctx):
+    """
+    Stops capturing audio and saves it to files.
+    """
+    vc = ctx.guild.voice_client
+
+    if vc and vc.is_listening():
+        audio_sink = vc.sink
+        vc.stop_listening()
+        audio_sink.save()
+        await ctx.send("Recording stopped and audio saved.")
+    else:
+        await ctx.send("The bot is not currently recording.")

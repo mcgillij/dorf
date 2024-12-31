@@ -1,5 +1,6 @@
 import os
 import discord
+from discord.ext import voice_recv
 from bot.commands import bot
 
 async def connect_to_voice_channel_on_ready():
@@ -13,7 +14,7 @@ async def connect_to_voice_channel_on_ready():
         voice_channel = discord.utils.get(guild.voice_channels, id=voice_channel_id)
         if voice_channel:
             try:
-                await voice_channel.connect()
+                await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
                 print(f"Connected to voice channel: {voice_channel.name}")
             except discord.ClientException as e:
                 print(f"Already connected or error connecting: {e}")

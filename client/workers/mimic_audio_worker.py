@@ -6,31 +6,22 @@ from pydub import AudioSegment
 import traceback
 from bot.commands import bot, redis_client
 
-async def preprocess_text_for_audio(text: str) -> str:
+async def replace_userids(text: str) -> str:
     """
-    Preprocesses text for audio generation by:
-    1. Stripping out Discord emojis.
-    2. Replacing Discord user IDs with their display names.
+    Replacing Discord user IDs with their display names.
 
     Args:
         text (str): The text to preprocess.
-        guild (discord.Guild): The guild object to resolve user IDs.
 
     Returns:
         str: The processed text.
     """
-    # Regex to match custom Discord emojis (e.g., <:emoji_name:1234567890>)
-    emoji_pattern = r":\w+:"
-    text = re.sub(emoji_pattern, "", text)
-
     # Regex to match Discord user mentions (e.g., <@123456789012345678>)
     mention_pattern = r"<@!?(\d+)>"
 
     def replace_mention(match):
         user_id = int(match.group(1))
-        print(f"User ID: {user_id}")
         user = bot.get_user(user_id)
-        print(f"User: {user}")
         return user.display_name if user else f"User{user_id}"
 
     text = re.sub(mention_pattern, replace_mention, text)
@@ -83,9 +74,7 @@ async def mimic_audio_task():
 
             unique_id, line_number, line_text = task_data.split("|", 2)
             text_file_path = None
-            print(f"Processing audio generation task: {line_number} - {line_text}")
-            line_text = await preprocess_text_for_audio(line_text)
-            print(f"Postprocessed text: {line_text}")
+            line_text = await replace_userids(line_text)
 
             # Check the number of users in the voice channel
             num_users = len(bot.voice_clients[0].channel.members) - 1 if bot.voice_clients else 0
