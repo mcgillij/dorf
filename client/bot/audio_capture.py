@@ -1,10 +1,21 @@
 """ AudioCapture class to capture and save audio per user. """
 import os
+import json
 import wave
 import numpy as np
 from pydub import AudioSegment
 from discord.ext import voice_recv
 from discord.ext.voice_recv import VoiceData
+import redis
+from dotenv import load_dotenv
+
+
+load_dotenv()
+# Configure Redis
+REDIS_HOST = os.getenv("REDIS_HOST", "")
+REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
+
+redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 
 
@@ -70,6 +81,8 @@ class AudioCapture(voice_recv.AudioSink):
             os.remove(original_path)
 
             print(f"Converted audio for user {user_id} to {converted_path}.")
+            # Enqueue the converted path
+            redis_client.lpush('whisper_queue', json.dumps({"user_id": user_id, "audio_path": converted_path}))
 
     def cleanup(self):
         """

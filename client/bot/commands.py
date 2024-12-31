@@ -6,15 +6,16 @@ import os
 import redis
 import discord
 from discord.ext import commands, voice_recv
-from discord.ext.voice_recv import VoiceData
+from dotenv import load_dotenv
 
 from bot.utilities import split_message, split_text
 from bot.audio_capture import AudioCapture
 
+load_dotenv()
 # Configure Redis
 REDIS_HOST = os.getenv("REDIS_HOST", "")
-REDIS_PORT = os.getenv("REDIS_PORT", "")
-redis_client = redis.Redis(host='0.0.0.0', port=6379, decode_responses=True)
+REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
+redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 # Configure bot and intents
 INTENTS = discord.Intents.default()
@@ -120,8 +121,6 @@ async def stop(ctx):
         await ctx.send("Recording stopped and audio saved.")
     else:
         await ctx.send("The bot is not currently recording.")
-
-
 
 @bot.command()
 async def test_whisper(ctx):
