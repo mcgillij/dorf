@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from bot.utilities import split_message
+from bot.utilities import split_message, split_text
 import redis
 import json
 import hashlib
@@ -73,7 +73,7 @@ async def derf(ctx, *, message: str):
         summary_response = await poll_redis_for_key(f"summarizer:{unique_id}")
 
         await ctx.send(summary_response)
-        await process_audio_queue(unique_id, summary_response.split("\n"), voice_user_count)
+        await process_audio_queue(unique_id, split_text(summary_response), voice_user_count)
     else:
-        await process_audio_queue(unique_id, response.split("\n"), voice_user_count)
+        await process_audio_queue(unique_id, split_text(response), voice_user_count)
 

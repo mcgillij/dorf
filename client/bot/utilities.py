@@ -1,4 +1,5 @@
 import os
+import re
 import dotenv
 from random import randint
 from typing import List
@@ -106,3 +107,10 @@ def split_message(message: str, max_length: int = 2000) -> List[str]:
         chunks.append(message[:end_index + 1].strip())
         message = message[end_index + 1:].strip()
     return chunks
+
+def split_text(text):
+    """
+    Splits the text into chunks using newlines (\n) or periods (.) as delimiters.
+    """
+    return [chunk.strip() for chunk in re.split(r'[.\n]', text) if chunk.strip()]
+
