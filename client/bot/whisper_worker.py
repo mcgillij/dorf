@@ -42,11 +42,14 @@ class WhisperWorker:
                     # Ensure WhisperClient.get_text is called within an event loop context
                     text_response = asyncio.run(self._get_text_from_audio(audio_path))
                     if text_response:
+                        # {"unique_id": 465152, "message": "427590626905948165: What's your favorite weapon?\n"}
+                        # {"unique_id": "3a946d5e5d11350474220da38d878e38", "message": "427590626905948165:whats your favorite weapon"}
                         print(f"Text response: {text_response}")
                         unique_id = randint(100000, 999999)  # Generate a random unique ID
                         redis_client.lpush('voice_response_queue', json.dumps({"unique_id": str(unique_id), "message": f"{user_id}: {text_response.strip()}"}))
-# {"unique_id": 465152, "message": "427590626905948165: What's your favorite weapon?\n"}
-# {"unique_id": "3a946d5e5d11350474220da38d878e38", "message": "427590626905948165:whats your favorite weapon"}
+                        print(f"Pushed response to Redis queue.")
+                        # now we can remove the audio file
+                        os.remove(audio_path)
 
                     else:
                         print("No text response received.")
