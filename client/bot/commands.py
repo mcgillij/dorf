@@ -120,3 +120,15 @@ async def stop(ctx):
         await ctx.send("Recording stopped and audio saved.")
     else:
         await ctx.send("The bot is not currently recording.")
+
+
+
+@bot.command()
+async def test_whisper(ctx):
+    """
+    test whisper
+    """
+    from .utilities import WhisperClient
+    whisper_client = WhisperClient()
+    text = await whisper_client.get_text("user_audio/427590626905948165.wav")
+    await ctx.send(f"Here is your whisper text: {text}.")
