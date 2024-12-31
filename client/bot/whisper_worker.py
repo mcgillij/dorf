@@ -1,5 +1,6 @@
 import os
 import json
+from random import randint
 from utilities import WhisperClient
 import redis
 import asyncio  # Ensure you have this imported for running async code
@@ -25,7 +26,7 @@ class WhisperWorker:
                 # Get a blocking pop from the queue (blocking until an item is available)
                 path_data = redis_client.blpop('whisper_queue', timeout=30)  # Timeout of 30 seconds
                 if not path_data or len(path_data) < 2:
-                    print("No data received from Redis queue.")
+                    #print("No data received from Redis queue.")
                     continue
                 key, raw_value = path_data  # Unpack the tuple correctly
                 print(f"Received key: {key}, Raw Value: {raw_value}")
@@ -42,6 +43,11 @@ class WhisperWorker:
                     text_response = asyncio.run(self._get_text_from_audio(audio_path))
                     if text_response:
                         print(f"Text response: {text_response}")
+                        unique_id = randint(100000, 999999)  # Generate a random unique ID
+                        redis_client.lpush('voice_response_queue', json.dumps({"unique_id": str(unique_id), "message": f"{user_id}: {text_response.strip()}"}))
+# {"unique_id": 465152, "message": "427590626905948165: What's your favorite weapon?\n"}
+# {"unique_id": "3a946d5e5d11350474220da38d878e38", "message": "427590626905948165:whats your favorite weapon"}
+
                     else:
                         print("No text response received.")
                 except json.JSONDecodeError as e:
