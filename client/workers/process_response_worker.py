@@ -1,6 +1,7 @@
 import asyncio
 import redis
 import json
+import traceback
 
 from bot.utilities import derf_bot
 
@@ -17,6 +18,7 @@ async def process_response_queue():
             if not task_data:
                 await asyncio.sleep(1)
                 continue
+            print(f"Received task data: {task_data}")
 
             # Parse task data
             task = json.loads(task_data)
