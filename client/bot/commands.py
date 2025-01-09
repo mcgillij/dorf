@@ -90,8 +90,25 @@ async def on_voice_state_update(member, before, after):
     # Check if the member is joining a voice channel
     if after.channel and not before.channel:
         await start_capture(member.guild, after.channel)
+    if before.self_mute != after.self_mute or before.self_deaf != after.self_deaf:
+        # Voice state changed (like PTT release)
+        vc = member.guild.voice_client
+        if vc and vc.is_listening():
+            print(f"Voice state changed for {member}")
+            sink = vc.sink
+            if isinstance(sink, RingBufferAudioSink):
+                if member.id in sink.vad_detectors:
+                    if sink.vad_detectors[member.id].is_speaking:
+                        print(f"Saving audio due to voice state change for {member}")
+                        await bot.loop.run_in_executor(None, sink.save_user_audio, member.id)
+# async def on_voice_state_update(member, before, after):
+    # print(f"Voice state update: {member} | Before: {before.channel} | After: {after.channel}")
 
-# Function to start capturing audio when a user joins a voice channel
+    # # Check if the member is joining a voice channel
+    # if after.channel and not before.channel:
+        # await start_capture(member.guild, after.channel)
+
+# # Function to start capturing audio when a user joins a voice channel
 async def start_capture(guild, channel):
     vc = guild.voice_client
 
