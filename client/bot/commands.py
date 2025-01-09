@@ -81,6 +81,8 @@ async def derf(ctx, *, message: str):
         await process_audio_queue(unique_id, split_text(summary_response), voice_user_count)
     else:
         await process_audio_queue(unique_id, split_text(response), voice_user_count)
+
+
 @bot.event
 async def on_voice_state_update(member, before, after):
     print(f"Voice state update: {member} | Before: {before.channel} | After: {after.channel}")
@@ -105,31 +107,6 @@ async def start_capture(guild, channel):
 
     print(f"Recording started in channel {channel}. Use `!stop_capture` to stop and save the audio.")
 
-
-@bot.command()
-async def cap(ctx):
-    """
-    Starts capturing audio for all users in the voice channel using the ring buffer.
-    """
-    if not ctx.author.voice:
-        await ctx.send("You must be in a voice channel to use this command.")
-        return
-
-    voice_channel = ctx.author.voice.channel
-    vc = ctx.guild.voice_client
-
-    if not vc:
-        vc = await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
-
-    if vc.is_listening():
-        await ctx.send("Already capturing audio.")
-        return
-
-    ring_buffer_sink = RingBufferAudioSink(buffer_size=1024 * 1024)
-    vc.listen(ring_buffer_sink)
-
-    await ctx.send("Recording started. Use `!stop_capture` to stop and save the audio.")
-
 @bot.command()
 async def stop(ctx):
     """
@@ -146,12 +123,27 @@ async def stop(ctx):
     else:
         await ctx.send("The bot is not currently recording.")
 
-@bot.command()
-async def test_whisper(ctx):
-    """
-    test whisper
-    """
-    from .utilities import WhisperClient
-    whisper_client = WhisperClient()
-    text = await whisper_client.get_text("user_audio/427590626905948165.wav")
-    await ctx.send(f"Here is your whisper text: {text}.")
+# @bot.command()
+# async def cap(ctx):
+    # """
+    # Starts capturing audio for all users in the voice channel using the ring buffer.
+    # """
+    # if not ctx.author.voice:
+        # await ctx.send("You must be in a voice channel to use this command.")
+        # return
+
+    # voice_channel = ctx.author.voice.channel
+    # vc = ctx.guild.voice_client
+
+    # if not vc:
+        # vc = await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
+
+    # if vc.is_listening():
+        # await ctx.send("Already capturing audio.")
+        # return
+
+    # ring_buffer_sink = RingBufferAudioSink(buffer_size=1024 * 1024)
+    # vc.listen(ring_buffer_sink)
+
+    # await ctx.send("Recording started. Use `!stop_capture` to stop and save the audio.")
+
