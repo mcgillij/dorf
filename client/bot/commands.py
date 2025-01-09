@@ -81,6 +81,30 @@ async def derf(ctx, *, message: str):
         await process_audio_queue(unique_id, split_text(summary_response), voice_user_count)
     else:
         await process_audio_queue(unique_id, split_text(response), voice_user_count)
+@bot.event
+async def on_voice_state_update(member, before, after):
+    print(f"Voice state update: {member} | Before: {before.channel} | After: {after.channel}")
+
+    # Check if the member is joining a voice channel
+    if after.channel and not before.channel:
+        await start_capture(member.guild, after.channel)
+
+# Function to start capturing audio when a user joins a voice channel
+async def start_capture(guild, channel):
+    vc = guild.voice_client
+
+    if not vc or vc.channel != channel:
+        vc = await channel.connect(cls=voice_recv.VoiceRecvClient)
+
+    if vc.is_listening():
+        print("Already capturing audio.")
+        return
+
+    ring_buffer_sink = RingBufferAudioSink(buffer_size=1024 * 1024)
+    vc.listen(ring_buffer_sink)
+
+    print(f"Recording started in channel {channel}. Use `!stop_capture` to stop and save the audio.")
+
 
 @bot.command()
 async def cap(ctx):
