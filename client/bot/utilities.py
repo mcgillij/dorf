@@ -1,5 +1,6 @@
 import os
 import re
+import threading
 import dotenv
 from random import randint
 from typing import List
@@ -139,3 +140,46 @@ class WhisperClient:
                 print(f"Exception during API call: {e}")
                 traceback.print_exc()
                 return "An error occurred while processing the request. Please try again later."
+
+
+class RingBuffer:
+    def __init__(self, size: int):
+        self.buffer = bytearray(size)
+        self.size = size
+        self.write_ptr = 0
+        self.read_ptr = 0
+        self.is_full = False
+        self.lock = threading.Lock()
+
+    def write(self, data: bytes):
+        with self.lock:
+            data_len = len(data)
+            if data_len > self.size:
+                # If data exceeds buffer size, write only the last chunk
+                data = data[-self.size:]
+                data_len = len(data)
+
+            # Write data in a circular manner
+            for byte in data:
+                self.buffer[self.write_ptr] = byte
+                self.write_ptr = (self.write_ptr + 1) % self.size
+                if self.is_full:
+                    self.read_ptr = (self.read_ptr + 1) % self.size
+                self.is_full = self.write_ptr == self.read_ptr
+
+    def read_all(self) -> bytes:
+        with self.lock:
+            if not self.is_full and self.write_ptr == self.read_ptr:
+                # Buffer is empty
+                return b""
+
+            if self.is_full:
+                # Read from the full buffer
+                data = self.buffer[self.read_ptr:] + self.buffer[:self.write_ptr]
+            else:
+                # Read from the used portion
+                data = self.buffer[self.read_ptr:self.write_ptr]
+
+            self.read_ptr = self.write_ptr  # Mark buffer as read
+            self.is_full = False
+            return bytes(data)

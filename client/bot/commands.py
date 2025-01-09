@@ -9,7 +9,7 @@ from discord.ext import commands, voice_recv
 from dotenv import load_dotenv
 
 from bot.utilities import split_message, split_text
-from bot.audio_capture import AudioCapture
+from bot.audio_capture import RingBufferAudioSink, VoiceRecvClient
 
 load_dotenv()
 # Configure Redis
@@ -82,11 +82,10 @@ async def derf(ctx, *, message: str):
     else:
         await process_audio_queue(unique_id, split_text(response), voice_user_count)
 
-
 @bot.command()
 async def cap(ctx):
     """
-    Starts capturing audio for all users in the voice channel.
+    Starts capturing audio for all users in the voice channel using the ring buffer.
     """
     if not ctx.author.voice:
         await ctx.send("You must be in a voice channel to use this command.")
@@ -102,10 +101,10 @@ async def cap(ctx):
         await ctx.send("Already capturing audio.")
         return
 
-    audio_sink = AudioCapture(output_dir="user_audio")
-    vc.listen(audio_sink)
+    ring_buffer_sink = RingBufferAudioSink(buffer_size=1024 * 1024)
+    vc.listen(ring_buffer_sink)
 
-    await ctx.send("Recording started. Use `!stop` to stop and save the audio.")
+    await ctx.send("Recording started. Use `!stop_capture` to stop and save the audio.")
 
 @bot.command()
 async def stop(ctx):
@@ -118,6 +117,7 @@ async def stop(ctx):
         audio_sink = vc.sink
         vc.stop_listening()
         audio_sink.save()
+        audio_sink.cleanup2()
         await ctx.send("Recording stopped and audio saved.")
     else:
         await ctx.send("The bot is not currently recording.")

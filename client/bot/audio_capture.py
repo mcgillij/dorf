@@ -2,12 +2,12 @@
 import os
 import json
 import wave
-import numpy as np
 from pydub import AudioSegment
-from discord.ext import voice_recv
-from discord.ext.voice_recv import VoiceData
+import discord
+from discord.ext.voice_recv import AudioSink, VoiceData
 import redis
 from dotenv import load_dotenv
+from .utilities import RingBuffer
 
 
 load_dotenv()
@@ -18,80 +18,99 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 
-
-class AudioCapture(voice_recv.AudioSink):
-    """
-    A custom audio sink to capture and save audio per user.
-    """
-    def __init__(self, output_dir="user_audio"):
+class RingBufferAudioSink(AudioSink):
+    def __init__(self, buffer_size=1024 * 1024, output_dir="user_audio"):
+        self.ring_buffers = {}  # One buffer per user
+        self.buffer_size = buffer_size
         self.output_dir = output_dir
-        self.user_audio_data = {}
 
-        # Ensure the output directory exists
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
+        # Ensure output directory exists
+        os.makedirs(self.output_dir, exist_ok=True)
 
     def write(self, member, data: VoiceData):
         """
-        Collects PCM audio data for each user.
-        Args:
-            member: The user whose audio is being processed.
-            data: The VoiceData object containing PCM audio.
+        Writes PCM data into the user's ring buffer.
         """
-        pcm_bytes = data.pcm  # Extract the raw PCM data from VoiceData
-        if member.id not in self.user_audio_data:
-            self.user_audio_data[member.id] = []
-        self.user_audio_data[member.id].append(pcm_bytes)
+        if member.id not in self.ring_buffers:
+            self.ring_buffers[member.id] = RingBuffer(self.buffer_size)
+
+        self.ring_buffers[member.id].write(data.pcm)
 
     def save(self):
         """
-        Saves captured audio for each user to separate .wav files.
+        Saves all buffered audio for each user to separate .wav files.
         """
-        if not self.user_audio_data:
-            print("No audio data to save.")
-            return
-
-        for user_id, audio_data in self.user_audio_data.items():
-            if not audio_data:
-                print(f"No audio data for user {user_id}.")
+        for user_id, ring_buffer in self.ring_buffers.items():
+            pcm_data = ring_buffer.read_all()
+            if not pcm_data:
+                print(f"No audio data to save for user {user_id}.")
                 continue
+            converted_path = save_audio(user_id, pcm_data, self.output_dir)
 
-            # Convert the raw PCM data into a NumPy array
-            pcm_data = b"".join(audio_data)
-            np_data = np.frombuffer(pcm_data, dtype=np.int16)
-
-            # Save the original WAV file
-            original_path = os.path.join(self.output_dir, f"{user_id}_original.wav")
-            with wave.open(original_path, "wb") as wav_file:
-                wav_file.setnchannels(2)  # stereo
-                wav_file.setsampwidth(2)  # 16-bit pcm
-                wav_file.setframerate(48000)  # discord uses 48khz sample rate
-                wav_file.writeframes(np_data.tobytes())
-
-            print(f"Saved original audio for user {user_id} to {original_path}.")
-
-            # Convert to Whisper-compatible format
-            converted_path = os.path.join(self.output_dir, f"{user_id}.wav")
-            audio = AudioSegment.from_file(original_path, format="wav")
-            audio = audio.set_channels(1)  # Mono
-            audio = audio.set_frame_rate(16000)  # 16 kHz sample rate
-            audio.export(converted_path, format="wav", codec="pcm_s16le")
-
-            # now we can delete the original file
-            os.remove(original_path)
-
-            print(f"Converted audio for user {user_id} to {converted_path}.")
-            # Enqueue the converted path
             redis_client.lpush('whisper_queue', json.dumps({"user_id": user_id, "audio_path": converted_path}))
 
     def cleanup(self):
-        """
-        Clean up resources if needed.
-        """
         pass
+
+    def cleanup2(self):
+        """
+        Cleans up all audio data stored in the sink.
+        """
+        #self.user_audio_data.clear()
+        self.ring_buffers.clear()
+        print("RingBufferAudioSink cleanup")
 
     def wants_opus(self):
         """
         Return False because we want PCM audio data, not Opus.
         """
         return False
+
+def save_audio(user_id: int, pcm_data, output_dir: str) -> str:
+    """
+    Saves PCM audio data to a Whisper-compatible WAV file.
+    :param user_id: The ID of the user whose audio is being saved.
+    :param pcm_data: Raw PCM audio data.
+    :param output_dir: Directory to save audio files.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # File paths
+    original_path = os.path.join(output_dir, f"{user_id}-original.wav")
+    converted_path = os.path.join(output_dir, f"{user_id}.wav")
+
+    # Save original WAV file
+    with wave.open(original_path, "wb") as wav_file:
+        wav_file.setnchannels(2)  # Stereo
+        wav_file.setsampwidth(2)  # 16-bit PCM
+        wav_file.setframerate(48000)  # 48 kHz
+        wav_file.writeframes(pcm_data)
+    print(f"Saved original audio for user {user_id} to {original_path}.")
+
+    # Convert to Whisper-compatible format
+    audio = AudioSegment.from_file(original_path, format="wav")
+    audio.set_channels(1).set_frame_rate(16000).export(converted_path, format="wav", codec="pcm_s16le")
+    print(f"Converted audio for user {user_id} to {converted_path}.")
+
+    # Clean up original file
+    os.remove(original_path)
+    print(f"Deleted original audio file for user {user_id}: {original_path}.")
+    return converted_path
+
+
+class VoiceRecvClient(discord.VoiceProtocol):
+    def __init__(self, client: discord.Client, channel: discord.abc.Connectable):
+        print("VoiceRecvClient init")
+        super().__init__(client, channel)
+        self.audio_sink = None
+
+    async def on_ready(self):
+        print("VoiceRecvClient on_ready")
+        if self.audio_sink:
+            await self.send_audio_packet(b'', True)
+
+    async def send_audio_packet(self, data, is_last=False):
+        print(f"Sending audio packet to sink: {self.audio_sink}")
+        if not self.audio_sink:
+            return
+        await self.audio_sink.read(data)
