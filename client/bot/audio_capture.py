@@ -9,7 +9,8 @@ from discord.ext.voice_recv import AudioSink, VoiceData
 import redis
 from dotenv import load_dotenv
 from .utilities import RingBuffer
-import numpy as np
+from typing import Dict, Optional
+import asyncio
 
 
 load_dotenv()
@@ -19,119 +20,86 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
 
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
-class VoiceActivityDetector:
-    def __init__(self, 
-                 silence_threshold=-50,
-                 silence_duration=1.0,
-                 min_speech_duration=0.5
-                ):
-        self.silence_threshold = silence_threshold
-        self.silence_duration = silence_duration
-        self.min_speech_duration = min_speech_duration
-        self.last_audio_time = None
-        self.speech_start_time = None
-        self.is_speaking = False
-        self.last_packet_time = None
-        self.first_packet_received = False
-        print(f"VAD initialized with threshold={silence_threshold}, silence_duration={silence_duration}")
-
-    def get_audio_level(self, pcm_data):
-        try:
-            float_data = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float32)
-            rms = np.sqrt(np.mean(float_data**2))
-            db = 20 * np.log10(rms) if rms > 0 else -float('inf')
-            return db
-        except Exception as e:
-            print(f"Error calculating audio level: {e}")
-            return -float('inf')
-
-    def process_audio(self, pcm_data, current_time):
-        # Only update last_packet_time when we first start receiving audio
-        if not self.first_packet_received:
-            self.first_packet_received = True
-            self.last_packet_time = current_time
-            print("First packet received")
-            
-        audio_level = self.get_audio_level(pcm_data)
-        print(f"Audio level: {audio_level:.2f} dB")
-
-        if audio_level > self.silence_threshold:
-            self.last_audio_time = current_time
-            if not self.is_speaking:
-                self.is_speaking = True
-                self.speech_start_time = current_time
-                print(f"Speech started at {self.speech_start_time}")
-            return False
-        
-        return False
-
-    def check_ptt_release(self, current_time):
-        if not self.first_packet_received or self.last_packet_time is None:
-            return False
-            
-        time_since_last_packet = current_time - self.last_packet_time
-        print(f"Checking PTT release: {time_since_last_packet:.3f}s since last packet")
-        
-        # Consider PTT released if no packets received for 0.5 seconds
-        if time_since_last_packet > 0.5:
-            if self.is_speaking:
-                print("PTT release detected!")
-                self.is_speaking = False
-                self.first_packet_received = False  # Reset for next speech segment
-                self.last_packet_time = None
-                return True
-        else:
-            self.last_packet_time = current_time  # Update timestamp only if we're still receiving packets
-            
-        return False
-
 class RingBufferAudioSink(AudioSink):
-    def __init__(self, buffer_size=1024 * 1024, output_dir="user_audio"):
+    def __init__(self, bot, buffer_size=1024 * 1024, output_dir="user_audio"):
+        self.bot = bot  # Store bot instance for access to the loop
         self.ring_buffers = {}
         self.buffer_size = buffer_size
         self.output_dir = output_dir
-        self.vad_detectors = {}
         self.last_check_time = {}
+        self.last_audio_time: Dict[int, float] = {}
+        self.processing_locks: Dict[int, asyncio.Lock] = {}
+        self.save_task = None
+        self.ssrc_to_user: Dict[int, int] = {}  # Map SSRC to user ID
         os.makedirs(self.output_dir, exist_ok=True)
         print("RingBufferAudioSink initialized")
 
     def write(self, member, data: VoiceData):
         try:
             current_time = time.time()
+            user_id = member.id if member else None
+            if not user_id:
+                return
+
+            if user_id not in self.processing_locks:
+                self.processing_locks[user_id] = asyncio.Lock()
             
-            if member.id not in self.ring_buffers:
-                print(f"Creating new buffer and VAD for user {member.id}")
-                self.ring_buffers[member.id] = RingBuffer(self.buffer_size)
-                self.vad_detectors[member.id] = VoiceActivityDetector(
-                    silence_threshold=-45,
-                    silence_duration=0.8,
-                    min_speech_duration=0.3
+            if user_id not in self.ring_buffers:
+                print(f"Creating new buffer for user {user_id}")
+                self.ring_buffers[user_id] = RingBuffer(self.buffer_size)
+                self.last_check_time[user_id] = current_time
+
+            self.ring_buffers[user_id].write(data.pcm)
+            self.last_audio_time[user_id] = current_time
+
+            # Use the bot's loop 
+            if not self.save_task or self.save_task.done():
+                self.save_task = asyncio.run_coroutine_threadsafe(
+                    self.check_for_silence(),
+                    self.bot.loop
                 )
-                self.last_check_time[member.id] = current_time
-
-            self.ring_buffers[member.id].write(data.pcm)
-            vad = self.vad_detectors[member.id]
-
-            # Process audio data for VAD
-            vad.process_audio(data.pcm, current_time)
-            #self.vad_detectors[member.id].process_audio(data.pcm, current_time)
-
-            # Check for PTT release periodically
-            if current_time - self.last_check_time[member.id] > 0.1:  # Check every 100ms
-                self.last_check_time[member.id] = current_time
-                if vad.check_ptt_release(current_time):
-                    print(f"PTT release detected for user {member.id} - saving audio")
-                    self.save_user_audio(member.id)
 
         except Exception as e:
             print(f"Error in write method: {e}")
+    def on_voice_state_update(self, member, state):
+        """Called when a member's voice state changes"""
+        if member and hasattr(state, 'ssrc'):
+            self.ssrc_to_user[state.ssrc] = member.id
+            print(f"Mapped SSRC {state.ssrc} to user {member.id}")
+
+    async def check_for_silence(self):
+        """Background task to check for silence periods and save audio"""
+        try:
+            while True:
+                current_time = time.time()
+                for user_id, last_time in list(self.last_audio_time.items()):
+                    # If we haven't received audio for 0.5 seconds (adjust as needed)
+                    if current_time - last_time > 0.5:
+                        if user_id in self.ring_buffers and not self.ring_buffers[user_id].is_empty():
+                            # Only process if we're not already processing for this user
+                            if not self.processing_locks[user_id].locked():
+                                async with self.processing_locks[user_id]:
+                                    await self.bot.loop.run_in_executor(
+                                        None, self.save_user_audio, user_id
+                                    )
+                            del self.last_audio_time[user_id]
+
+                # If no active audio streams, end the task
+                if not self.last_audio_time:
+                    return
+
+                await asyncio.sleep(0.1)  # Small delay to prevent CPU overuse
+        except Exception as e:
+            print(f"Error in check_for_silence: {e}")
 
     def save_user_audio(self, user_id):
         try:
             print(f"Attempting to save audio for user {user_id}")
-            ring_buffer = self.ring_buffers[user_id]
+            ring_buffer = self.ring_buffers.get(user_id)
+            if not ring_buffer:
+                print(f"No ring buffer found for user {user_id}")
+                return
             pcm_data = ring_buffer.read_all()
-            
             if pcm_data:
                 print(f"Got PCM data of length {len(pcm_data)}")
                 converted_path = save_audio(user_id, pcm_data, self.output_dir)
@@ -142,7 +110,6 @@ class RingBufferAudioSink(AudioSink):
                 print(f"Saved audio to {converted_path}")
             else:
                 print("No PCM data to save")
-                
             ring_buffer.clear()
         except Exception as e:
             print(f"Error in save_user_audio: {e}")
@@ -154,12 +121,6 @@ class RingBufferAudioSink(AudioSink):
 
     def cleanup(self):
         pass
-
-    def cleanup2(self):
-        self.ring_buffers.clear()
-        self.vad_detectors.clear()
-        self.last_check_time.clear()
-        print("RingBufferAudioSink cleanup completed")
 
     def wants_opus(self):
         return False

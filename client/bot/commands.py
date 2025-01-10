@@ -97,70 +97,21 @@ async def on_voice_state_update(member, before, after):
             print(f"Voice state changed for {member}")
             sink = vc.sink
             if isinstance(sink, RingBufferAudioSink):
-                if member.id in sink.vad_detectors:
-                    if sink.vad_detectors[member.id].is_speaking:
-                        print(f"Saving audio due to voice state change for {member}")
-                        await bot.loop.run_in_executor(None, sink.save_user_audio, member.id)
-# async def on_voice_state_update(member, before, after):
-    # print(f"Voice state update: {member} | Before: {before.channel} | After: {after.channel}")
+                print(f"Saving audio due to voice state change for {member}")
+                await bot.loop.run_in_executor(None, sink.save_user_audio, member.id)
 
-    # # Check if the member is joining a voice channel
-    # if after.channel and not before.channel:
-        # await start_capture(member.guild, after.channel)
-
-# # Function to start capturing audio when a user joins a voice channel
 async def start_capture(guild, channel):
-    vc = guild.voice_client
-
-    if not vc or vc.channel != channel:
-        vc = await channel.connect(cls=voice_recv.VoiceRecvClient)
-
-    if vc.is_listening():
-        print("Already capturing audio.")
-        return
-
-    ring_buffer_sink = RingBufferAudioSink(buffer_size=1024 * 1024)
-    vc.listen(ring_buffer_sink)
-
-    print(f"Recording started in channel {channel}. Use `!stop_capture` to stop and save the audio.")
-
-@bot.command()
-async def stop(ctx):
-    """
-    Stops capturing audio and saves it to files.
-    """
-    vc = ctx.guild.voice_client
-
-    if vc and vc.is_listening():
-        audio_sink = vc.sink
-        vc.stop_listening()
-        audio_sink.save()
-        audio_sink.cleanup2()
-        await ctx.send("Recording stopped and audio saved.")
-    else:
-        await ctx.send("The bot is not currently recording.")
-
-# @bot.command()
-# async def cap(ctx):
-    # """
-    # Starts capturing audio for all users in the voice channel using the ring buffer.
-    # """
-    # if not ctx.author.voice:
-        # await ctx.send("You must be in a voice channel to use this command.")
-        # return
-
-    # voice_channel = ctx.author.voice.channel
-    # vc = ctx.guild.voice_client
-
-    # if not vc:
-        # vc = await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
-
-    # if vc.is_listening():
-        # await ctx.send("Already capturing audio.")
-        # return
-
-    # ring_buffer_sink = RingBufferAudioSink(buffer_size=1024 * 1024)
-    # vc.listen(ring_buffer_sink)
-
-    # await ctx.send("Recording started. Use `!stop_capture` to stop and save the audio.")
-
+    try:
+        vc = guild.voice_client
+        if not vc or vc.channel != channel:
+            vc = await channel.connect(cls=VoiceRecvClient)
+        
+        if vc.is_listening():
+            print("Already capturing audio.")
+            return
+            
+        ring_buffer_sink = RingBufferAudioSink(bot=bot, buffer_size=1024 * 1024)
+        vc.listen(ring_buffer_sink)
+        print(f"Recording started in channel {channel}")
+    except Exception as e:
+        print(f"Error in start_capture: {e}")

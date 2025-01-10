@@ -183,3 +183,13 @@ class RingBuffer:
             self.read_ptr = self.write_ptr  # Mark buffer as read
             self.is_full = False
             return bytes(data)
+
+    def is_empty(self) -> bool:
+        with self.lock:
+            return not self.is_full and self.write_ptr == self.read_ptr
+
+    def clear(self):
+        with self.lock:
+            self.write_ptr = 0
+            self.read_ptr = 0
+            self.is_full = False
