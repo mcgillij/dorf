@@ -51,6 +51,10 @@ async def monitor_response_queue():
             if not channel:
                 print(f"Channel {fallback_channel_id} not found.")
                 continue
+            guild = channel.guild
+            # send the question the user asked to back to the chat before processing response
+            for message_chunk in split_message(actual_message, 2000):
+                await channel.send(f"{guild.get_member(user_id)}: {message_chunk}")
 
             # Call get_response
             response_from_llm = await derf_bot.get_response(message)
@@ -66,7 +70,6 @@ async def monitor_response_queue():
                 await channel.send(response_chunk)
 
             # Check for voice channel users
-            guild = channel.guild
             voice_user_count = (
                 len(guild.voice_client.channel.members) - 1
                 if guild.voice_client and guild.voice_client.channel
