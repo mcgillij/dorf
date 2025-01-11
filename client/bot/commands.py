@@ -52,6 +52,13 @@ async def process_audio_queue(unique_id: str, messages: list[str], voice_user_co
 
 @bot.command()
 async def derf(ctx, *, message: str):
+    filtered_keywords = {"QA", "BDD", "pytest", "testing"}  # Add the keywords to filter
+
+    # Check if the message contains any filtered keywords
+    if any(keyword in message.lower() for keyword in filtered_keywords):
+        await ctx.send("Nice try nerd!")
+        return
+
     unique_id = generate_unique_id(ctx, message)
     print(f"Unique ID: {unique_id}")
 
