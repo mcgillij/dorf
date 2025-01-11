@@ -116,32 +116,6 @@ def split_text(text):
     return [chunk.strip() for chunk in re.split(r'[.\n]', text) if chunk.strip()]
 
 
-class WhisperClient:
-    async def get_text(self, audio_file_path: str) -> str:
-        url = f"http://127.0.0.1:8080/inference"
-        headers = {
-            'accept': 'application/json',
-        }
-        
-        files = {"file": open(audio_file_path, "rb")}
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.post(url, headers=headers, data=files) as response:
-                    if response.status == 200:
-                        json_response = await response.json()
-                        return json_response.get("text", "")
-                    else:
-                        print(f"Error: {response.status} - {await response.text()}")
-                        return ""
-            except asyncio.TimeoutError:
-                print("Request timed out.")
-                return "The request timed out. Please try again later."
-            except Exception as e:
-                print(f"Exception during API call: {e}")
-                traceback.print_exc()
-                return "An error occurred while processing the request. Please try again later."
-
-
 class RingBuffer:
     def __init__(self, size: int):
         self.buffer = bytearray(size)

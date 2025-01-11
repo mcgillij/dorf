@@ -1,10 +1,11 @@
 import os
+import re
 import json
 from random import randint
-from utilities import WhisperClient
 import redis
 import asyncio  # Ensure you have this imported for running async code
 from dotenv import load_dotenv
+import aiohttp
 
 load_dotenv()
 # Configure Redis
@@ -12,6 +13,32 @@ REDIS_HOST = os.getenv("REDIS_HOST", "")
 REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
 
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+
+bot_name_pattern = re.compile(r'\b(bot|derf|derfbot|dorf|dwarf)\b', re.IGNORECASE)
+
+class WhisperClient:
+    async def get_text(self, audio_file_path: str) -> str:
+        url = f"http://127.0.0.1:8080/inference"
+        headers = {
+            'accept': 'application/json',
+        }
+        files = {"file": open(audio_file_path, "rb")}
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(url, headers=headers, data=files) as response:
+                    if response.status == 200:
+                        json_response = await response.json()
+                        return json_response.get("text", "")
+                    else:
+                        print(f"Error: {response.status} - {await response.text()}")
+                        return ""
+            except asyncio.TimeoutError:
+                print("Request timed out.")
+                return "The request timed out. Please try again later."
+            except Exception as e:
+                print(f"Exception during API call: {e}")
+                traceback.print_exc()
+                return "An error occurred while processing the request. Please try again later."
 
 class WhisperWorker:
     def process_audio(self):
@@ -42,13 +69,16 @@ class WhisperWorker:
                     # Ensure WhisperClient.get_text is called within an event loop context
                     text_response = asyncio.run(self._get_text_from_audio(audio_path))
                     if text_response:
-                        # {"unique_id": 465152, "message": "427590626905948165: What's your favorite weapon?\n"}
-                        # {"unique_id": "3a946d5e5d11350474220da38d878e38", "message": "427590626905948165:whats your favorite weapon"}
-                        print(f"Text response: {text_response}")
-                        unique_id = randint(100000, 999999)  # Generate a random unique ID
-                        redis_client.lpush('voice_response_queue', json.dumps({"unique_id": str(unique_id), "message": f"{user_id}: {text_response.strip()}"}))
-                        print(f"Pushed response to Redis queue.")
-                        # now we can remove the audio file
+                        if bot_name_pattern.search(text_response):
+                            # {"unique_id": 465152, "message": "427590626905948165: What's your favorite weapon?\n"}
+                            # {"unique_id": "3a946d5e5d11350474220da38d878e38", "message": "427590626905948165:whats your favorite weapon"}
+                            print(f"Text response: {text_response}")
+                            unique_id = randint(100000, 999999)  # Generate a random unique ID
+                            redis_client.lpush('voice_response_queue', json.dumps({"unique_id": str(unique_id), "message": f"{user_id}: {text_response.strip()}"}))
+                            print(f"Pushed response to Redis queue.")
+                            # now we can remove the audio file
+                        else:
+                            print(f"No bot name found in text response: {text_response}")
                         os.remove(audio_path)
 
                     else:

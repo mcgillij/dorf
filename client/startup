@@ -7,6 +7,6 @@
 docker run -d -p 6379:6379 redis
 docker run -d -p 8080:8080 --network=host --device=/dev/kfd --device=/dev/dri --group-add=video --ipc=host --cap-add=SYS_PTRACE --security-opt seccomp=unconfined ghcr.io/ggerganov/whisper.cpp:main /app/build/bin/whisper-server -m /app/models/ggml-base.en.bin
 
-poetry run python bot/whisper_worker.py &
+poetry run python daemon/whisper_worker.py &
 
 poetry run watchmedo auto-restart -p "*.py" -R python -- derfbot.py &
