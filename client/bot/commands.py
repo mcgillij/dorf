@@ -2,6 +2,7 @@ import json
 import hashlib
 import asyncio
 import os
+from random import choice
 
 import redis
 import discord
@@ -50,13 +51,58 @@ async def process_audio_queue(unique_id: str, messages: list[str], voice_user_co
             redis_client.lpush('audio_queue', f"{unique_id}|{index}|{msg}")
             index += 1
 
+filtered_responses = [
+    "Nice try nerd!",
+    "Nice try, but you're still a noob.",
+    "Almost there, but not close enough.",
+    "You missed by a mile!",
+    "Not quite, keep trying harder!",
+    "Close, but you need to step it up.",
+    "You were almost there, but not quite.",
+    "Good effort, now go learn more.",
+    "Almost had it, but not quite enough.",
+    "Nice shot, just a little off.",
+    "Almost got it, but still missing the mark.",
+    "You're close, but need to practice more.",
+    "Almost there, but you’re slipping.",
+    "Good try, now go study up.",
+    "Not exactly right, but keep trying!",
+    "Close enough for a joke, but not real.",
+    "Nice effort, just need a bit more focus.",
+    "You were almost there, but still off.",
+    "Good start, now go get it right.",
+    "Almost had it, but missed by a long shot.",
+    "Nice attempt, but you're not there yet.",
+    "Close, but you need to work harder.",
+    "You were almost there, but still off-base.",
+    "Good effort, now go get it right.",
+    "Almost got it, just a little more.",
+    "Nice try, but the answer eludes you.",
+    "Close enough for a laugh, not real.",
+    "You were almost there, but still off.",
+    "Good effort, now go get it right!",
+    "Almost had it, just need to focus more.",
+    "Nice try, but the answer is eluding you.",
+    "Close enough for a joke, not real.",
+    "You were almost there, but still off.",
+    "Good effort, now go get it right!",
+    "Almost got it, just need to focus more.",
+    "Nice attempt, but the answer is elusive.",
+    "Close enough for a laugh, not real.",
+    "You were almost there, but still off.",
+    "Good effort, now go get it right!",
+    "Almost had it, just need to focus more.",
+    "Nice try, but the answer is elusive."
+    ]
+
 @bot.command()
 async def derf(ctx, *, message: str):
-    filtered_keywords = {"QA", "BDD", "pytest", "testing", "gherkin"}  # Add the keywords to filter
+    filtered_keywords = {"behavior driven development", "QA", "BDD", "pytest", "testing", "gherkin", "test", "specflow", "cypress", "playwrite"}  # Add the keywords to filter
 
     # Check if the message contains any filtered keywords
     if any(keyword.lower() in message.lower() for keyword in filtered_keywords):
-        await ctx.send("Nice try nerd!")
+        await ctx.send(choice(filtered_responses))
+        #await ctx.send("Nice try nerd!")
         return
 
     unique_id = generate_unique_id(ctx, message)
