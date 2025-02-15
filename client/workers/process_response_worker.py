@@ -6,7 +6,8 @@ import traceback
 from bot.utilities import derf_bot
 
 # Initialize Redis client
-redis_client = redis.Redis(host='0.0.0.0', port=6379, decode_responses=True)
+redis_client = redis.Redis(host="0.0.0.0", port=6379, decode_responses=True)
+
 
 async def process_response_queue():
     """
@@ -14,7 +15,7 @@ async def process_response_queue():
     """
     while True:
         try:
-            task_data = redis_client.rpop('response_queue')
+            task_data = redis_client.rpop("response_queue")
             if not task_data:
                 await asyncio.sleep(1)
                 continue
@@ -22,8 +23,8 @@ async def process_response_queue():
 
             # Parse task data
             task = json.loads(task_data)
-            unique_id = task['unique_id']
-            message = task['message']
+            unique_id = task["unique_id"]
+            message = task["message"]
 
             # Call get_response
             response = await derf_bot.get_response(message)

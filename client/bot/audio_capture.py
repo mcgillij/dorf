@@ -1,4 +1,5 @@
-""" AudioCapture class to capture and save audio per user. """
+"""AudioCapture class to capture and save audio per user."""
+
 import os
 import json
 import wave
@@ -19,6 +20,7 @@ REDIS_HOST = os.getenv("REDIS_HOST", "")
 REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
 
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+
 
 class RingBufferAudioSink(AudioSink):
     def __init__(self, bot, buffer_size=1024 * 1024, output_dir="user_audio"):
@@ -43,7 +45,7 @@ class RingBufferAudioSink(AudioSink):
 
             if user_id not in self.processing_locks:
                 self.processing_locks[user_id] = asyncio.Lock()
-            
+
             if user_id not in self.ring_buffers:
                 print(f"Creating new buffer for user {user_id}")
                 self.ring_buffers[user_id] = RingBuffer(self.buffer_size)
@@ -52,18 +54,18 @@ class RingBufferAudioSink(AudioSink):
             self.ring_buffers[user_id].write(data.pcm)
             self.last_audio_time[user_id] = current_time
 
-            # Use the bot's loop 
+            # Use the bot's loop
             if not self.save_task or self.save_task.done():
                 self.save_task = asyncio.run_coroutine_threadsafe(
-                    self.check_for_silence(),
-                    self.bot.loop
+                    self.check_for_silence(), self.bot.loop
                 )
 
         except Exception as e:
             print(f"Error in write method: {e}")
+
     def on_voice_state_update(self, member, state):
         """Called when a member's voice state changes"""
-        if member and hasattr(state, 'ssrc'):
+        if member and hasattr(state, "ssrc"):
             self.ssrc_to_user[state.ssrc] = member.id
             print(f"Mapped SSRC {state.ssrc} to user {member.id}")
 
@@ -75,7 +77,10 @@ class RingBufferAudioSink(AudioSink):
                 for user_id, last_time in list(self.last_audio_time.items()):
                     # If we haven't received audio for 0.5 seconds (adjust as needed)
                     if current_time - last_time > 0.5:
-                        if user_id in self.ring_buffers and not self.ring_buffers[user_id].is_empty():
+                        if (
+                            user_id in self.ring_buffers
+                            and not self.ring_buffers[user_id].is_empty()
+                        ):
                             # Only process if we're not already processing for this user
                             if not self.processing_locks[user_id].locked():
                                 async with self.processing_locks[user_id]:
@@ -103,10 +108,10 @@ class RingBufferAudioSink(AudioSink):
             if pcm_data:
                 print(f"Got PCM data of length {len(pcm_data)}")
                 converted_path = save_audio(user_id, pcm_data, self.output_dir)
-                redis_client.lpush('whisper_queue', json.dumps({
-                    "user_id": user_id,
-                    "audio_path": converted_path
-                }))
+                redis_client.lpush(
+                    "whisper_queue",
+                    json.dumps({"user_id": user_id, "audio_path": converted_path}),
+                )
                 print(f"Saved audio to {converted_path}")
             else:
                 print("No PCM data to save")
@@ -124,6 +129,7 @@ class RingBufferAudioSink(AudioSink):
 
     def wants_opus(self):
         return False
+
 
 def save_audio(user_id: int, pcm_data, output_dir: str) -> str:
     try:
@@ -151,6 +157,7 @@ def save_audio(user_id: int, pcm_data, output_dir: str) -> str:
         print(f"Error in save_audio: {e}")
         return None
 
+
 class VoiceRecvClient(discord.VoiceProtocol):
     def __init__(self, client: discord.Client, channel: discord.abc.Connectable):
         print("VoiceRecvClient init")
@@ -160,7 +167,7 @@ class VoiceRecvClient(discord.VoiceProtocol):
     async def on_ready(self):
         print("VoiceRecvClient on_ready")
         if self.audio_sink:
-            await self.send_audio_packet(b'', True)
+            await self.send_audio_packet(b"", True)
 
     async def send_audio_packet(self, data, is_last=False):
         print(f"Sending audio packet to sink: {self.audio_sink}")

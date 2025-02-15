@@ -1,4 +1,5 @@
-""" Derfbot, the logical iteration of DORFBOT """
+"""Derfbot, the logical iteration of DORFBOT"""
+
 import os
 import asyncio
 import logging
@@ -12,12 +13,13 @@ from bot.voice_manager import connect_to_voice_channel_on_ready
 from workers.voice_queue_processor import monitor_response_queue
 
 logging.basicConfig(level=logging.WARN)
-#logging.basicConfig(level=logging.DEBUG)
+# logging.basicConfig(level=logging.DEBUG)
+
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user.name}')
-    print('------')
+    print(f"Logged in as {bot.user.name}")
+    print("------")
     asyncio.create_task(connect_to_voice_channel_on_ready())
     asyncio.create_task(mimic_audio_task())
     asyncio.create_task(playback_task())
@@ -25,7 +27,10 @@ async def on_ready():
     asyncio.create_task(process_summarizer_queue())
     asyncio.create_task(monitor_response_queue())
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
+
     async def main():
         await bot.start(os.getenv("DISCORD_BOT_TOKEN", ""))
+
     asyncio.run(main())

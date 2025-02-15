@@ -3,11 +3,12 @@ import discord
 from discord.ext import voice_recv
 from bot.commands import bot
 
+
 async def connect_to_voice_channel_on_ready():
     guild_id = int(os.getenv("GUILD_ID", ""))
-    #print(f"Guild ID: {guild_id}")
+    # print(f"Guild ID: {guild_id}")
     voice_channel_id = int(os.getenv("VOICE_CHANNEL_ID", ""))
-    #print(f"Voice Channel ID: {voice_channel_id}")
+    # print(f"Voice Channel ID: {voice_channel_id}")
     guild = discord.utils.get(bot.guilds, id=guild_id)
     print("Connecting to voice channel...")
     if guild:
@@ -24,4 +25,3 @@ async def connect_to_voice_channel_on_ready():
             print("Voice channel not found.")
     else:
         print("Guild not found.")
-

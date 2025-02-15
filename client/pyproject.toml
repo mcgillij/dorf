@@ -22,6 +22,7 @@ discord-ext-voice-recv = "^0.4.2a145"
 
 [tool.poetry.group.dev.dependencies]
 watchdog = "^6.0.0"
+black = "^25.1.0"
 
 [build-system]
 requires = ["poetry-core"]

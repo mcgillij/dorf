@@ -8,7 +8,11 @@ from bot.commands import bot
 from dotenv import load_dotenv
 
 from bot.utilities import split_message, split_text, derf_bot
-from bot.commands import poll_redis_for_key, LONG_RESPONSE_THRESHOLD, process_audio_queue
+from bot.commands import (
+    poll_redis_for_key,
+    LONG_RESPONSE_THRESHOLD,
+    process_audio_queue,
+)
 
 load_dotenv()
 # Configure Redis
@@ -19,6 +23,7 @@ redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=Tr
 
 CHAT_CHANNEL_ID = int(os.getenv("CHAT_CHANNEL_ID", ""))
 
+
 @tasks.loop(seconds=1)
 async def monitor_response_queue():
     """Monitor the Redis voice response queue for new items."""
@@ -27,7 +32,7 @@ async def monitor_response_queue():
     while True:
         try:
             # Fetch an item from the Redis response queue
-            queued_item = redis_client.rpop('voice_response_queue')
+            queued_item = redis_client.rpop("voice_response_queue")
             if queued_item is None:
                 await asyncio.sleep(1)  # No items in the queue, wait and retry
                 continue
@@ -79,15 +84,21 @@ async def monitor_response_queue():
 
             # Summarize response if it's long
             if len(response) > LONG_RESPONSE_THRESHOLD:
-                redis_client.lpush('summarizer_queue', json.dumps({"unique_id": unique_id, "message": response}))
+                redis_client.lpush(
+                    "summarizer_queue",
+                    json.dumps({"unique_id": unique_id, "message": response}),
+                )
                 summary_response = await poll_redis_for_key(f"summarizer:{unique_id}")
 
                 await channel.send(summary_response)
-                await process_audio_queue(unique_id, split_text(summary_response), voice_user_count)
+                await process_audio_queue(
+                    unique_id, split_text(summary_response), voice_user_count
+                )
             else:
-                await process_audio_queue(unique_id, split_text(response), voice_user_count)
+                await process_audio_queue(
+                    unique_id, split_text(response), voice_user_count
+                )
 
         except Exception as e:
             print(f"Error in monitor_response_queue: {e}")
             await asyncio.sleep(1)  # Avoid spamming on continuous errors
-
