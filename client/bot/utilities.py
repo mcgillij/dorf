@@ -11,7 +11,7 @@ import hashlib
 
 dotenv.load_dotenv()
 
-timeout = aiohttp.ClientTimeout(total=20)
+timeout = aiohttp.ClientTimeout(total=120)
 
 # Constants for API interaction
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
@@ -135,7 +135,7 @@ class DerfBot:
                         return ""
             except asyncio.TimeoutError:
                 print("Request timed out.")
-                return "The request timed out. Please try again later."
+                return "The summarizer request timed out. Please try again later."
             except Exception as e:
                 print(f"Exception during API call: {e}")
                 return "An error occurred while processing the summarizer request. Please try again later."

@@ -35,7 +35,7 @@ class WhisperClient:
                         return ""
             except asyncio.TimeoutError:
                 print("Request timed out.")
-                return "The request timed out. Please try again later."
+                return "The whisper request timed out. Please try again later."
             except Exception as e:
                 print(f"Exception during API call: {e}")
                 traceback.print_exc()
