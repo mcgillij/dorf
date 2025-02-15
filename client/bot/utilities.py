@@ -14,7 +14,7 @@ timeout = aiohttp.ClientTimeout(total=20)
 
 # Constants for API interaction
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
-WORKSPACE = "a-new-workspace"
+WORKSPACE = "birthright"
 SESSION_ID = "my-session-id"
 
 
