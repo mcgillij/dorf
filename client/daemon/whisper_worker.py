@@ -11,9 +11,10 @@ import aiohttp
 import logging
 
 logger = logging.getLogger(__name__)
+FORMAT = '%(asctime)s - %(message)s'
+logging.basicConfig(format=FORMAT)
 logger.addHandler(logging.FileHandler('whisper_worker.log'))
 logger.setLevel(logging.INFO)
-logger.Formatter('%(asctime)s - %(message)s')
 
 load_dotenv()
 # Configure Redis
