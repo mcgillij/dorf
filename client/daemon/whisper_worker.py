@@ -6,6 +6,7 @@ import redis
 import asyncio  # Ensure you have this imported for running async code
 from dotenv import load_dotenv
 import aiohttp
+from db import SQLiteDB
 
 # Logging setup
 import logging
@@ -24,6 +25,10 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 bot_name_pattern = re.compile(r"\b(bot|derf|derfbot|dorf|dwarf)\b", re.IGNORECASE)
+
+# Initialize the database
+db = SQLiteDB()
+db.create_table()  # Create table if it doesn't exist
 
 
 class WhisperClient:
@@ -81,7 +86,7 @@ class WhisperWorker:
                     # Ensure WhisperClient.get_text is called within an event loop context
                     text_response = asyncio.run(self._get_text_from_audio(audio_path))
                     if text_response:
-                        logger.debug(f"Text response: {text_response}")
+                        logger.debug(f"{user_id}: {text_response}")
                         if bot_name_pattern.search(text_response):
                             # {"unique_id": 465152, "message": "427590626905948165: What's your favorite weapon?\n"}
                             # {"unique_id": "3a946d5e5d11350474220da38d878e38", "message": "427590626905948165:whats your favorite weapon"}
@@ -105,6 +110,7 @@ class WhisperWorker:
                                 f"No bot name found in text response: {text_response}"
                             )
                         os.remove(audio_path)
+                        db.insert_entry(user_id, text_response.strip())
 
                     else:
                         logger.info("No text response received.")
