@@ -5,6 +5,7 @@ import asyncio
 from pydub import AudioSegment
 import traceback
 from bot.commands import bot, redis_client
+from bot.utilities import logger
 
 
 async def replace_userids(text: str) -> str:
@@ -62,7 +63,7 @@ async def run_mimic3_subprocess(output_dir, text_file_path):
             )
         return stdout.decode("utf-8")
     except Exception as e:
-        print(f"Error in run_mimic3_subprocess: {e}")
+        logger.error(f"Error in run_mimic3_subprocess: {e}")
         traceback.print_exc()
         return None
 
@@ -90,7 +91,7 @@ async def mimic_audio_task():
                 else 0
             )
             if num_users < 1:
-                print(
+                logger.info(
                     f"Skipping audio generation as there are only {num_users} users in the voice channel."
                 )
                 continue
@@ -105,13 +106,13 @@ async def mimic_audio_task():
                     text_file_path = text_file.name
 
                 # Generate TTS audio using Mimic 3
-                print(f"Generating audio for line {line_number}: {line_text}")
+                logger.info(f"Generating audio for line {line_number}: {line_text}")
                 await run_mimic3_subprocess(output_dir, text_file_path)
 
                 # Path to the generated WAV file
                 wav_path = os.path.join(output_dir, f"{line_number}.wav")
                 if not os.path.exists(wav_path):
-                    print(
+                    logger.info(
                         f"Failed to generate audio for line {line_number}: {line_text}"
                     )
                     continue
@@ -128,12 +129,12 @@ async def mimic_audio_task():
                 if os.path.exists(opus_path):
                     redis_client.lpush("playback_queue", f"{unique_id}|{opus_path}")
                 else:
-                    print(f"Opus file does not exist: {opus_path}")
+                    logger.error(f"Opus file does not exist: {opus_path}")
 
             finally:
                 # Clean up temporary files
                 if text_file_path and os.path.exists(text_file_path):
                     os.remove(text_file_path)
         except Exception as e:
-            print(f"Error processing audio generation task: {e}")
+            logger.error(f"Error processing audio generation task: {e}")
             traceback.print_exc()

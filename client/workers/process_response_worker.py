@@ -3,7 +3,7 @@ import redis
 import json
 import traceback
 
-from bot.utilities import derf_bot
+from bot.utilities import derf_bot, logger
 
 # Initialize Redis client
 redis_client = redis.Redis(host="0.0.0.0", port=6379, decode_responses=True)
@@ -19,7 +19,7 @@ async def process_response_queue():
             if not task_data:
                 await asyncio.sleep(1)
                 continue
-            print(f"Received task data: {task_data}")
+            logger.info(f"Received task data: {task_data}")
 
             # Parse task data
             task = json.loads(task_data)
@@ -32,5 +32,5 @@ async def process_response_queue():
             # Store the response in Redis for retrieval
             redis_client.set(f"response:{unique_id}", response)
         except Exception as e:
-            print(f"Error processing response queue: {e}")
+            logger.error(f"Error processing response queue: {e}")
             traceback.print_exc()

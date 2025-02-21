@@ -8,10 +8,17 @@ import asyncio
 import traceback
 import redis
 import hashlib
+import logging
 
 dotenv.load_dotenv()
 
 timeout = aiohttp.ClientTimeout(total=120)
+
+logger = logging.getLogger(__name__)
+FORMAT = "%(asctime)s - %(message)s"
+logging.basicConfig(format=FORMAT)
+logger.addHandler(logging.FileHandler("derf.log"))
+logger.setLevel(logging.DEBUG)
 
 # Constants for API interaction
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
@@ -131,13 +138,15 @@ class DerfBot:
                         json_response = await response.json()
                         return json_response.get("textResponse", "")
                     else:
-                        print(f"Error: {response.status} - {await response.text()}")
+                        logger.error(
+                            f"Error: {response.status} - {await response.text()}"
+                        )
                         return ""
             except asyncio.TimeoutError:
-                print("Request timed out.")
+                logger.error("Request timed out.")
                 return "The summarizer request timed out. Please try again later."
             except Exception as e:
-                print(f"Exception during API call: {e}")
+                logger.error(f"Exception during API call: {e}")
                 return "An error occurred while processing the summarizer request. Please try again later."
 
     async def get_response(self, message: str) -> str:
@@ -160,13 +169,15 @@ class DerfBot:
                         json_response = await response.json()
                         return json_response.get("textResponse", "")
                     else:
-                        print(f"Error: {response.status} - {await response.text()}")
+                        logger.error(
+                            f"Error: {response.status} - {await response.text()}"
+                        )
                         return ""
             except asyncio.TimeoutError:
-                print("Request timed out.")
+                logger.error("Request timed out.")
                 return "The request timed out. Please try again later."
             except Exception as e:
-                print(f"Exception during API call: {e}")
+                logger.error(f"Exception during API call: {e}")
                 traceback.print_exc()
                 return "An error occurred while processing the request. Please try again later."
 

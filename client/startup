@@ -9,5 +9,5 @@
 
 #nohup poetry run python daemon/whisper_worker.py &
 
-poetry run python derfbot.py
-#khnohup poetry run watchmedo auto-restart -p "*.py" -R python -- derfbot.py &
+nohup poetry run python derfbot.py &
+#nohup poetry run watchmedo auto-restart -p "*.py" -R python -- derfbot.py &

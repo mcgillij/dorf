@@ -2,7 +2,7 @@ import asyncio
 import redis
 import json
 import traceback
-from bot.utilities import derf_bot
+from bot.utilities import derf_bot, logger
 
 redis_client = redis.Redis(host="0.0.0.0", port=6379, decode_responses=True)
 
@@ -17,7 +17,7 @@ async def process_summarizer_queue():
             if not task_data:
                 await asyncio.sleep(1)
                 continue
-
+            logger.info("Summarizer queue item found, processing")
             # Parse task data
             task = json.loads(task_data)
             unique_id = task["unique_id"]
@@ -29,5 +29,5 @@ async def process_summarizer_queue():
             # Store the response in Redis for retrieval
             redis_client.set(f"summarizer:{unique_id}", response)
         except Exception as e:
-            print(f"Error processing summarizer queue: {e}")
+            logger.error(f"Error processing summarizer queue: {e}")
             traceback.print_exc()

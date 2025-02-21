@@ -3,6 +3,7 @@ import redis
 import os
 import discord
 from bot.commands import bot, context_dict
+from bot.utilities import logger
 
 from dotenv import load_dotenv
 
@@ -31,7 +32,7 @@ async def playback_task():
             # Fetch the voice channel by ID
             channel = bot.get_channel(VOICE_CHANNEL_ID)
             if not channel or not isinstance(channel, discord.VoiceChannel):
-                print(f"Voice channel {VOICE_CHANNEL_ID} not found or invalid.")
+                logger.info(f"Voice channel {VOICE_CHANNEL_ID} not found or invalid.")
                 continue
 
             # Get the voice client for the guild
@@ -39,17 +40,17 @@ async def playback_task():
             voice_client = discord.utils.get(bot.voice_clients, guild=guild)
 
             if not voice_client or not voice_client.is_connected():
-                print("Voice client not connected. Attempting to reconnect...")
+                logger.info("Voice client not connected. Attempting to reconnect...")
                 try:
                     voice_client = await channel.connect()
                 except discord.ClientException as e:
-                    print(f"Error connecting to voice channel: {e}")
+                    logger.error(f"Error connecting to voice channel: {e}")
                     continue
 
             # Check the number of users in the voice channel
             num_users = len(channel.members) - 1  # Subtract 1 for the bot itself
             if num_users < 1:
-                print(
+                logger.info(
                     f"Skipping playback as there are only {num_users} users in the voice channel."
                 )
                 continue
@@ -59,7 +60,8 @@ async def playback_task():
                 opus_path, method="fallback", options="-vn -b:a 128k"
             )
             voice_client.play(
-                audio_source, after=lambda e: print(f"Player error: {e}") if e else None
+                audio_source,
+                after=lambda e: logger.error(f"Player error: {e}") if e else None,
             )
 
             # Wait for the audio to finish playing
@@ -71,5 +73,5 @@ async def playback_task():
                 os.remove(opus_path)
 
         except Exception as e:
-            print(f"Error in playback_task: {e}")
+            logger.error(f"Error in playback_task: {e}")
             await asyncio.sleep(1)  # Avoid spamming on continuous errors

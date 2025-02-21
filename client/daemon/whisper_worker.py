@@ -7,15 +7,8 @@ import asyncio  # Ensure you have this imported for running async code
 from dotenv import load_dotenv
 import aiohttp
 from db import SQLiteDB
+from bot.utilities import logger
 
-# Logging setup
-import logging
-
-logger = logging.getLogger(__name__)
-FORMAT = '%(asctime)s - %(message)s'
-logging.basicConfig(format=FORMAT)
-logger.addHandler(logging.FileHandler('whisper_worker.log'))
-logger.setLevel(logging.INFO)
 
 load_dotenv()
 # Configure Redis
@@ -45,7 +38,9 @@ class WhisperClient:
                         json_response = await response.json()
                         return json_response.get("text", "")
                     else:
-                        logger.info(f"Error: {response.status} - {await response.text()}")
+                        logger.info(
+                            f"Error: {response.status} - {await response.text()}"
+                        )
                         return ""
             except asyncio.TimeoutError:
                 logger.info("Request timed out.")
@@ -80,7 +75,9 @@ class WhisperWorker:
                     user_id = path_info.get("user_id")
                     audio_path = path_info.get("audio_path")
                     if not user_id or not audio_path:
-                        logger.info("No valid user_id or audio_path in the received data.")
+                        logger.info(
+                            "No valid user_id or audio_path in the received data."
+                        )
                         continue
                     logger.info(f"Processing {audio_path} for user_id: {user_id}...")
                     # Ensure WhisperClient.get_text is called within an event loop context
@@ -137,4 +134,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

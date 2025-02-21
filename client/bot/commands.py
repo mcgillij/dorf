@@ -14,6 +14,7 @@ from bot.utilities import (
     poll_redis_for_key,
     filtered_responses,
     filter_message,
+    logger,
 )
 from bot.audio_capture import RingBufferAudioSink, VoiceRecvClient
 
@@ -38,7 +39,7 @@ context_dict = {}
 # Function to queue message processing
 async def queue_message_processing(ctx, message: str):
     unique_id = generate_unique_id(ctx, message)
-    print(f"Unique ID: {unique_id}")
+    logger.info(f"Unique ID: {unique_id}")
     # Store the context if not already stored
     context_dict.setdefault(unique_id, ctx)
     # Queue the message for processing
@@ -61,7 +62,7 @@ async def process_response(ctx, unique_id: str):
     voice_user_count = (
         len(ctx.guild.voice_client.channel.members) - 1 if ctx.guild.voice_client else 0
     )
-    print(f"Number of users in voice channel: {voice_user_count}")
+    logger.info(f"Number of users in voice channel: {voice_user_count}")
     # Summarize response if it's long
     if len(response) > LONG_RESPONSE_THRESHOLD:
         redis_client.lpush(
@@ -103,7 +104,7 @@ async def derf(ctx, *, message: str):
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    print(
+    logger.info(
         f"Voice state update: {member} | Before: {before.channel} | After: {after.channel}"
     )
 
@@ -114,10 +115,10 @@ async def on_voice_state_update(member, before, after):
         # Voice state changed (like PTT release)
         vc = member.guild.voice_client
         if vc and vc.is_listening():
-            print(f"Voice state changed for {member}")
+            logger.info(f"Voice state changed for {member}")
             sink = vc.sink
             if isinstance(sink, RingBufferAudioSink):
-                print(f"Saving audio due to voice state change for {member}")
+                logger.info(f"Saving audio due to voice state change for {member}")
                 await bot.loop.run_in_executor(None, sink.save_user_audio, member.id)
 
 
@@ -128,11 +129,11 @@ async def start_capture(guild, channel):
             vc = await channel.connect(cls=VoiceRecvClient)
 
         if vc.is_listening():
-            print("Already capturing audio.")
+            logger.info("Already capturing audio.")
             return
 
         ring_buffer_sink = RingBufferAudioSink(bot=bot, buffer_size=1024 * 1024)
         vc.listen(ring_buffer_sink)
-        print(f"Recording started in channel {channel}")
+        logger.info(f"Recording started in channel {channel}")
     except Exception as e:
-        print(f"Error in start_capture: {e}")
+        logger.error(f"Error in start_capture: {e}")
