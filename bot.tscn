@@ -70,4 +70,3 @@ one_shot = true
 
 [connection signal="request_completed" from="AwaitableHTTPRequest" to="." method="_on_awaitable_http_request_request_completed"]
 [connection signal="request_finished" from="AwaitableHTTPRequest" to="." method="_on_awaitable_http_request_request_finished"]
-[connection signal="timeout" from="Timer" to="." method="_on_timer_timeout"]
