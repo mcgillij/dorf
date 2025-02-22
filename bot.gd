@@ -26,7 +26,6 @@ func _process(delta: float) -> void:
 func back_to_idle():
 	dorf.play(&"idle")
 
-
 func connect_signals() -> void:
 	EventBus.input_window_send.connect(_on_input_window_send)
 	EventBus.input_window_toggle.connect(toggle_window)
@@ -40,34 +39,6 @@ func _on_input_window_send(query: String) -> void:
 	dorf.play(&"talking")
 	$Timer.start()  # Restart the timer for next poll
 	print_debug(text_response)
-
-
-func do_http_set_state(state: String) -> Dictionary:
-	var data = {
-		"state": state
-	}
-	var json_data = JSON.stringify(data)
-	var headers = [
-		"Content-Type: application/json"
-	]
-	# Make the POST request with the JSON data
-	var resp := await http.async_request(
-		fastapi_endpoint + "/api/set_dwarf_state",
-		headers,
-		HTTPClient.METHOD_POST,
-		json_data
-	)
-	if resp.success() and resp.status_ok():
-		print(resp.status)                   # 200
-		print(resp.headers["content-type"])  # application/json
-		var response_json: Dictionary
-		response_json = resp.body_as_json()
-		return response_json
-	else:
-		print("Request failed")
-		print("Status:", resp.status)
-		#print("Response body:", resp.body)
-		return {}
 
 func do_http_get_unique_id(unique_id: String) -> Dictionary:
 	var data = {
