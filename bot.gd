@@ -13,28 +13,19 @@ var dorf_idle := load("res://assets/images/dorf.png")
 var dorf_talking := load("res://assets/images/dorf_talking.png")
 var dorf_thinking := load("res://assets/images/dorf_thinking.png")
 
+var time_since_last_poll = 0.0
+
 func _ready() -> void:
 	connect_signals()
-	$Timer.timeout.connect(poll_dwarf_state)
+	$Timer.timeout.connect(back_to_idle)
 	$Timer.start()
 
 func _process(delta: float) -> void:
 	pass
 
-func poll_dwarf_state():
-	var response := await http.async_request(fastapi_endpoint + "/api/get_dwarf_state")
-	if response.success() and response.status_ok():
-		var state = response.body_as_json()["state"]
-		print_debug("polling")
-		match state:
-			# swap this to enums if it's working
-			"IDLE":
-				dorf.play(&"idle")
-			"TALKING":
-				dorf.play(&"talking")
-			"THINKING":
-				dorf.play(&"thinking")
-	$Timer.start()  # Restart the timer for next poll
+func back_to_idle():
+	dorf.play(&"idle")
+
 
 func connect_signals() -> void:
 	EventBus.input_window_send.connect(_on_input_window_send)
@@ -42,10 +33,41 @@ func connect_signals() -> void:
 	EventBus.dorf_clicked.connect(dorf_clicked)
 
 func _on_input_window_send(query: String) -> void:
+	dorf.play(&"thinking")
 	var unique_id := await do_http_query(query)
 	print_debug(unique_id)
 	var text_response := await do_http_get_unique_id(unique_id["unique_id"])
+	dorf.play(&"talking")
+	$Timer.start()  # Restart the timer for next poll
 	print_debug(text_response)
+
+
+func do_http_set_state(state: String) -> Dictionary:
+	var data = {
+		"state": state
+	}
+	var json_data = JSON.stringify(data)
+	var headers = [
+		"Content-Type: application/json"
+	]
+	# Make the POST request with the JSON data
+	var resp := await http.async_request(
+		fastapi_endpoint + "/api/set_dwarf_state",
+		headers,
+		HTTPClient.METHOD_POST,
+		json_data
+	)
+	if resp.success() and resp.status_ok():
+		print(resp.status)                   # 200
+		print(resp.headers["content-type"])  # application/json
+		var response_json: Dictionary
+		response_json = resp.body_as_json()
+		return response_json
+	else:
+		print("Request failed")
+		print("Status:", resp.status)
+		#print("Response body:", resp.body)
+		return {}
 
 func do_http_get_unique_id(unique_id: String) -> Dictionary:
 	var data = {
