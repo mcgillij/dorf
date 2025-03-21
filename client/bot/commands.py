@@ -31,6 +31,7 @@ INTENTS.message_content = True
 INTENTS.voice_states = True
 INTENTS.members = True
 bot = commands.Bot(command_prefix="!", intents=INTENTS)
+nic_bot = commands.Bot(command_prefix="!", intents=INTENTS)
 
 LONG_RESPONSE_THRESHOLD = 1000
 # Context dictionary
@@ -46,6 +47,18 @@ async def queue_message_processing(ctx, message: str):
     # Queue the message for processing
     redis_client.lpush(
         "response_queue",
+        json.dumps({"unique_id": unique_id, "message": f"{ctx.author.id}:{message}"}),
+    )
+    return unique_id
+
+async def queue_nic_message_processing(ctx, message: str):
+    unique_id = generate_unique_id(ctx, message)
+    logger.info(f"Unique ID: {unique_id}")
+    # Store the context if not already stored
+    context_dict.setdefault(unique_id, ctx)
+    # Queue the message for processing
+    redis_client.lpush(
+        "nic_response_queue",
         json.dumps({"unique_id": unique_id, "message": f"{ctx.author.id}:{message}"}),
     )
     return unique_id
@@ -94,6 +107,16 @@ async def process_audio_queue(
             redis_client.lpush("audio_queue", f"{unique_id}|{index}|{msg}")
             index += 1
 
+async def process_nic_audio_queue(
+    unique_id: str, messages: list[str], voice_user_count: int
+):
+    """Queues messages for audio generation if users are in the voice channel."""
+    if voice_user_count > 0:
+        index = 1
+        for msg in messages:
+            redis_client.lpush("audio_nic_queue", f"{unique_id}|{index}|{msg}")
+            index += 1
+
 
 # Command to handle messages
 @bot.command()
@@ -106,7 +129,12 @@ async def derf(ctx, *, message: str):
     unique_id = await queue_message_processing(ctx, message)
     await process_response(ctx, unique_id)
 
+@nic_bot.command()
+async def nic(ctx, *, message: str):
+    unique_id = await queue_nic_message_processing(ctx, message)
+    await process_response(ctx, unique_id)
 
+@nic_bot.event
 @bot.event
 async def on_voice_state_update(member, before, after):
     logger.info(

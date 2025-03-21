@@ -23,7 +23,9 @@ logger.setLevel(logging.DEBUG)
 # Constants for API interaction
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
 WORKSPACE = "birthright"
+NIC_WORKSPACE = "nic"
 SESSION_ID = "my-session-id"
+NIC_SESSION_ID = "my-session-id"
 LLM_HOST = os.getenv("LLM_HOST", "")
 
 redis_client = redis.Redis(decode_responses=True)
@@ -183,6 +185,7 @@ class DerfBot:
 
 
 derf_bot = DerfBot(AUTH_TOKEN, WORKSPACE, SESSION_ID)
+nicole_bot = DerfBot(AUTH_TOKEN, NIC_WORKSPACE, NIC_SESSION_ID)
 
 
 def split_text(text):  # This shouldn't be needed anymore since moving mostly to kokoro
