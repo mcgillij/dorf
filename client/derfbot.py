@@ -3,13 +3,12 @@
 import os
 import asyncio
 
-from bot.commands import bot, nic_bot
+from bot.commands import bot, nic_bot, connect_to_voice
 from bot.utilities import logger
 from workers.process_response_worker import process_response_queue, process_nic_response_queue
 from workers.process_summarizer_worker import process_summarizer_queue, process_nic_summarizer_queue
 from workers.mimic_audio_worker import mimic_audio_task, mimic_nic_audio_task
 from workers.playback_worker import playback_task, playback_nic_task
-from bot.voice_manager import connect_to_voice
 from workers.voice_queue_processor import monitor_response_queue, monitor_nic_response_queue
 
 
@@ -31,11 +30,10 @@ async def on_ready():
     asyncio.create_task(monitor_nic_response_queue())
     logger.info("done kicking off the bot")
 
-
+async def main():
+    await asyncio.gather(
+            bot.start(os.getenv("DISCORD_BOT_TOKEN", "")),
+            nic_bot.start(os.getenv("NIC_DISCORD_BOT_TOKEN", ""))
+        )
 if __name__ == "__main__":
-
-    async def main():
-        await bot.start(os.getenv("DISCORD_BOT_TOKEN", ""))
-        await nic_bot.start(os.getenv("NIC_DISCORD_BOT_TOKEN", ""))
-
     asyncio.run(main())

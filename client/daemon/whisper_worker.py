@@ -23,6 +23,7 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 bot_name_pattern = re.compile(r"\b(bot|derf|derfbot|dorf|dwarf)\b", re.IGNORECASE)
+nic_bot_name_pattern = re.compile(r"\b(nic|nick|nicole|nikky|nik)\b", re.IGNORECASE)
 
 # Initialize the database
 db = SQLiteDB()
@@ -89,7 +90,7 @@ class WhisperWorker:
                     text_response = asyncio.run(self._get_text_from_audio(audio_path))
                     if text_response:
                         logger.debug(f"{user_id}: {text_response}")
-                        if bot_name_pattern.search(text_response):
+                        if nic_bot_name_pattern.search(text_response):
                             logger.info(f"replying_to: {text_response}")
                             unique_id = randint(
                                 100000, 999999
