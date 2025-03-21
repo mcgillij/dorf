@@ -74,12 +74,14 @@ async def process_response(ctx, unique_id: str):
         summary_response = await poll_redis_for_key(summary_key)
         await ctx.send(summary_response)
         await process_audio_queue(
-            unique_id, [summary_response], voice_user_count
-            #unique_id, split_text(summary_response), voice_user_count  # don't have to split here with kokoro (only with mimic)
+            unique_id,
+            [summary_response],
+            voice_user_count,
+            # unique_id, split_text(summary_response), voice_user_count  # don't have to split here with kokoro (only with mimic)
         )
     else:
         await process_audio_queue(unique_id, [response], voice_user_count)
-        #await process_audio_queue(unique_id, split_text(response), voice_user_count)  # no splitting with kokoro
+        # await process_audio_queue(unique_id, split_text(response), voice_user_count)  # no splitting with kokoro
 
 
 async def process_audio_queue(
@@ -104,6 +106,7 @@ async def derf(ctx, *, message: str):
     unique_id = await queue_message_processing(ctx, message)
     await process_response(ctx, unique_id)
 
+
 @bot.event
 async def on_voice_state_update(member, before, after):
     logger.info(
@@ -120,7 +123,9 @@ async def on_voice_state_update(member, before, after):
         # Added logic for when the bot connects/joins a new channel
         elif after.channel and not before.channel:  # Bot just joined this channel
             guild = member.guild  # Guild where the bot is joining
-            logger.info(f"Bot has connected to {after.channel} in guild {guild}. Starting capture.")
+            logger.info(
+                f"Bot has connected to {after.channel} in guild {guild}. Starting capture."
+            )
             await start_capture(guild, after.channel)
             return
 

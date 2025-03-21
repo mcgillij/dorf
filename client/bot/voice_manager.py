@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 async def connect_to_voice():
     guild_id = int(os.getenv("GUILD_ID", ""))
     voice_channel_id = int(os.getenv("VOICE_CHANNEL_ID", ""))

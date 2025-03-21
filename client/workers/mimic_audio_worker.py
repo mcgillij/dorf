@@ -12,8 +12,9 @@ from kokoro import KPipeline
 import soundfile as sf
 
 pipeline = KPipeline(lang_code="a")  # english
-TTS_ENGINE = "kokoro" # or use the mimic3 docker container
+TTS_ENGINE = "kokoro"  # or use the mimic3 docker container
 TTS_VOICE = "am_adam"  # "af_nicole" funny whispering lady
+
 
 def process_kokoro_audio(line_text, voice, output_wav):
     """Sync function to handle kokoro TTS generation and file writing."""
@@ -32,10 +33,12 @@ def process_kokoro_audio(line_text, voice, output_wav):
         logger.error(f"Kokoro processing failed: {str(e)}")
         raise
 
+
 def convert_wav_to_opus(wav_path, opus_path):
     """Sync function to convert WAV to OPUS."""
     audio_segment = AudioSegment.from_wav(wav_path)
     audio_segment.export(opus_path, format="opus", parameters=["-b:a", "128k"])
+
 
 async def replace_userids(text: str) -> str:
     """
@@ -101,11 +104,7 @@ async def mimic_audio_task():
     output_dir = "/home/j/dorf/client/output/"
     loop = asyncio.get_event_loop()  # Reuse the same event loop
     while True:
-        task_data = await loop.run_in_executor(
-            None,
-            redis_client.rpop, 
-            "audio_queue"
-        )
+        task_data = await loop.run_in_executor(None, redis_client.rpop, "audio_queue")
 
         if not task_data:
             await asyncio.sleep(1)
@@ -115,8 +114,7 @@ async def mimic_audio_task():
         line_text = await replace_userids(line_text)  # Assuming this is async
 
         num_users = (
-            len(bot.voice_clients[0].channel.members) - 1
-            if bot.voice_clients else 0
+            len(bot.voice_clients[0].channel.members) - 1 if bot.voice_clients else 0
         )
 
         if num_users < 1:
@@ -125,22 +123,22 @@ async def mimic_audio_task():
 
         wav_path = os.path.join(output_dir, f"{line_number}.wav")
 
-        if TTS_ENGINE == 'mimic3':
+        if TTS_ENGINE == "mimic3":
             # Assume run_mimic3_subprocess is async and properly non-blocking
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as tmp_file:
+            with tempfile.NamedTemporaryFile(
+                mode="w", delete=False, suffix=".txt"
+            ) as tmp_file:
                 tmp_file.write(line_text)
                 tmp_file.flush()
 
-                await run_mimic3_subprocess(output_dir, tmp_file.name)  # Ensure this is an awaitable
+                await run_mimic3_subprocess(
+                    output_dir, tmp_file.name
+                )  # Ensure this is an awaitable
 
-        elif TTS_ENGINE == 'kokoro':
+        elif TTS_ENGINE == "kokoro":
             try:
                 await loop.run_in_executor(
-                    None,
-                    process_kokoro_audio,
-                    line_text,
-                    TTS_VOICE,
-                    wav_path
+                    None, process_kokoro_audio, line_text, TTS_VOICE, wav_path
                 )
             except Exception as e:
                 logger.error(f"Kokoro error for {line_text}: {str(e)}")
@@ -158,17 +156,9 @@ async def mimic_audio_task():
         with tempfile.NamedTemporaryFile(delete=False, suffix=".opus") as tmp_opus:
             opus_path = tmp_opus.name
 
-            await loop.run_in_executor(
-                None,
-                convert_wav_to_opus,
-                wav_path,
-                opus_path
-            )
+            await loop.run_in_executor(None, convert_wav_to_opus, wav_path, opus_path)
 
             # Push to playback queue without blocking
             await loop.run_in_executor(
-                None,
-                redis_client.lpush, 
-                "playback_queue",
-                f"{unique_id}|{opus_path}"
+                None, redis_client.lpush, "playback_queue", f"{unique_id}|{opus_path}"
             )

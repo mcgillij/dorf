@@ -8,6 +8,7 @@ logging.basicConfig(format=FORMAT)
 logger.addHandler(logging.FileHandler("derf.log"))
 logger.setLevel(logging.DEBUG)
 
+
 class SQLiteDB:
     def __init__(self, db_name="voice_responses.db"):
         logger.info("initializing the database")
