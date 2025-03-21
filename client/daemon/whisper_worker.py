@@ -7,8 +7,13 @@ import asyncio  # Ensure you have this imported for running async code
 from dotenv import load_dotenv
 import aiohttp
 from db import SQLiteDB
-from bot.utilities import logger
+import logging
 
+logger = logging.getLogger(__name__)
+FORMAT = "%(asctime)s - %(message)s"
+logging.basicConfig(format=FORMAT)
+logger.addHandler(logging.FileHandler("derf.log"))
+logger.setLevel(logging.DEBUG)
 
 load_dotenv()
 # Configure Redis

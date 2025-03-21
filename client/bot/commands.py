@@ -6,6 +6,7 @@ import redis
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+from voice_manager import connect_to_voice
 
 from bot.utilities import (
     split_message,
@@ -73,10 +74,12 @@ async def process_response(ctx, unique_id: str):
         summary_response = await poll_redis_for_key(summary_key)
         await ctx.send(summary_response)
         await process_audio_queue(
-            unique_id, split_text(summary_response), voice_user_count
+            unique_id, [summary_response], voice_user_count
+            #unique_id, split_text(summary_response), voice_user_count  # don't have to split here with kokoro (only with mimic)
         )
     else:
-        await process_audio_queue(unique_id, split_text(response), voice_user_count)
+        await process_audio_queue(unique_id, [response], voice_user_count)
+        #await process_audio_queue(unique_id, split_text(response), voice_user_count)  # no splitting with kokoro
 
 
 async def process_audio_queue(
@@ -101,24 +104,37 @@ async def derf(ctx, *, message: str):
     unique_id = await queue_message_processing(ctx, message)
     await process_response(ctx, unique_id)
 
-
 @bot.event
 async def on_voice_state_update(member, before, after):
     logger.info(
         f"Voice state update: {member} | Before: {before.channel} | After: {after.channel}"
     )
 
-    # Check if the member is joining a voice channel
+    if member == bot.user:
+        # Handle bot disconnection case
+        if not after.channel and before.channel:
+            logger.warning("Detected disconnection. Attempting to reconnect...")
+            await connect_to_voice()
+            return
+
+        # Added logic for when the bot connects/joins a new channel
+        elif after.channel and not before.channel:  # Bot just joined this channel
+            guild = member.guild  # Guild where the bot is joining
+            logger.info(f"Bot has connected to {after.channel} in guild {guild}. Starting capture.")
+            await start_capture(guild, after.channel)
+            return
+
+    # Existing logic for member joins:
     if after.channel and not before.channel:
         await start_capture(member.guild, after.channel)
-    if before.self_mute != after.self_mute or before.self_deaf != after.self_deaf:
-        # Voice state changed (like PTT release)
+
+    # Handle self mute/deaf changes
+    if (before.self_mute != after.self_mute) or (before.self_deaf != after.self_deaf):
         vc = member.guild.voice_client
         if vc and vc.is_listening():
             logger.info(f"Voice state changed for {member}")
             sink = vc.sink
             if isinstance(sink, RingBufferAudioSink):
-                logger.info(f"Saving audio due to voice state change for {member}")
                 await bot.loop.run_in_executor(None, sink.save_user_audio, member.id)
 
 

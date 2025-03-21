@@ -7,6 +7,7 @@ import traceback
 from bot.commands import bot, redis_client
 from bot.utilities import logger
 
+import numpy as np
 from kokoro import KPipeline
 import soundfile as sf
 

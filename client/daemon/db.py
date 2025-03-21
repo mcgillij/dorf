@@ -1,7 +1,12 @@
 import sqlite3
 from datetime import datetime
-from bot.utilities import logger
+import logging
 
+logger = logging.getLogger(__name__)
+FORMAT = "%(asctime)s - %(message)s"
+logging.basicConfig(format=FORMAT)
+logger.addHandler(logging.FileHandler("derf.log"))
+logger.setLevel(logging.DEBUG)
 
 class SQLiteDB:
     def __init__(self, db_name="voice_responses.db"):
