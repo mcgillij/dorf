@@ -18,7 +18,6 @@ async def on_ready():
     logger.info(f"Logged in as {bot.user.name}")
     await bot.wait_until_ready()
     await connect_to_voice()
-    #asyncio.create_task(connect_to_voice_channel_on_ready())
     asyncio.create_task(mimic_audio_task())
     asyncio.create_task(playback_task())
     asyncio.create_task(process_response_queue())

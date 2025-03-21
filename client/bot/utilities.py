@@ -185,7 +185,7 @@ class DerfBot:
 derf_bot = DerfBot(AUTH_TOKEN, WORKSPACE, SESSION_ID)
 
 
-def split_text(text):
+def split_text(text):  # This shouldn't be needed anymore since moving mostly to kokoro
     """
     Splits the text into chunks using newlines (\n) or periods (.) as delimiters.
     """
