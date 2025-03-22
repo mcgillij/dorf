@@ -14,7 +14,7 @@ import soundfile as sf
 pipeline = KPipeline(lang_code="a")  # english
 TTS_ENGINE = "kokoro"  # or use the mimic3 docker container
 TTS_VOICE = "am_adam"
-TTS_VOICE_NICOLE = "am_nicole"
+TTS_VOICE_NICOLE = "af_nicole"
 
 
 def process_kokoro_audio(line_text, voice, output_wav):
@@ -102,7 +102,7 @@ async def run_mimic3_subprocess(output_dir, text_file_path):
 
 
 async def mimic_nic_audio_task():
-    output_dir = "/home/j/dorf/client/nic_output/"
+    output_dir = "/home/j/dorf/client/output/"
     loop = asyncio.get_event_loop()  # Reuse the same event loop
     while True:
         task_data = await loop.run_in_executor(None, redis_client.rpop, "audio_nic_queue")

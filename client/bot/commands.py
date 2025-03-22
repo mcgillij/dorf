@@ -30,7 +30,7 @@ INTENTS.message_content = True
 INTENTS.voice_states = True
 INTENTS.members = True
 bot = commands.Bot(command_prefix="!", intents=INTENTS)
-nic_bot = commands.Bot(command_prefix="!", intents=INTENTS)
+nic_bot = commands.Bot(command_prefix="#", intents=INTENTS)
 
 LONG_RESPONSE_THRESHOLD = 1000
 # Context dictionary
@@ -52,12 +52,12 @@ async def queue_message_processing(ctx, message: str):
 
 async def queue_nic_message_processing(ctx, message: str):
     unique_id = generate_unique_id(ctx, message)
-    logger.info(f"Unique ID: {unique_id}")
+    logger.info(f"Nic: Unique ID: {unique_id}")
     # Store the context if not already stored
     context_dict.setdefault(unique_id, ctx)
     # Queue the message for processing
     redis_client.lpush(
-        "nic_response_queue",
+        "response_nic_queue",
         json.dumps({"unique_id": unique_id, "message": f"{ctx.author.id}:{message}"}),
     )
     return unique_id
@@ -95,6 +95,36 @@ async def process_response(ctx, unique_id: str):
         await process_audio_queue(unique_id, [response], voice_user_count)
         # await process_audio_queue(unique_id, split_text(response), voice_user_count)  # no splitting with kokoro
 
+async def process_nic_response(ctx, unique_id: str):
+    # Poll Redis for the result
+    key = f"response_nic:{unique_id}"
+    response = await poll_redis_for_key(key)
+    # Send the response in chunks
+    for response_chunk in split_message(response, 2000):
+        await ctx.send(response_chunk)
+    # Check for voice channel users
+    voice_user_count = (
+        len(ctx.guild.voice_client.channel.members) - 1 if ctx.guild.voice_client else 0
+    )
+    logger.info(f"Number of users in voice channel: {voice_user_count}")
+    # Summarize response if it's long
+    if len(response) > LONG_RESPONSE_THRESHOLD:
+        redis_client.lpush(
+            "summarizer_nic_queue",
+            json.dumps({"unique_id": unique_id, "message": response}),
+        )
+        summary_key = f"summarizer_nic:{unique_id}"
+        summary_response = await poll_redis_for_key(summary_key)
+        await ctx.send(summary_response)
+        await process_nic_audio_queue(
+            unique_id,
+            [summary_response],
+            voice_user_count,
+            # unique_id, split_text(summary_response), voice_user_count  # don't have to split here with kokoro (only with mimic)
+        )
+    else:
+        await process_nic_audio_queue(unique_id, [response], voice_user_count)
+        # await process_audio_queue(unique_id, split_text(response), voice_user_count)  # no splitting with kokoro
 
 async def process_audio_queue(
     unique_id: str, messages: list[str], voice_user_count: int
@@ -131,7 +161,7 @@ async def derf(ctx, *, message: str):
 @nic_bot.command()
 async def nic(ctx, *, message: str):
     unique_id = await queue_nic_message_processing(ctx, message)
-    await process_response(ctx, unique_id)
+    await process_nic_response(ctx, unique_id)
 
 @nic_bot.event
 @bot.event
@@ -145,7 +175,7 @@ async def on_voice_state_update(member, before, after):
             # Handle bot disconnection case
             if not after.channel and before.channel:
                 logger.warning("Detected disconnection. Attempting to reconnect...")
-                await connect_to_voice()
+                await connect_to_voice(b)
                 return
 
             # Added logic for when the bot connects/joins a new channel
@@ -189,40 +219,39 @@ async def start_capture(guild, channel):
             logger.error(f"Error in start_capture: {e}")
 
 
-async def connect_to_voice():
-    for b in [bot, nic_bot]:
-        guild_id = int(os.getenv("GUILD_ID", ""))
-        voice_channel_id = int(os.getenv("VOICE_CHANNEL_ID", ""))
-        guild = discord.utils.get(b.guilds, id=guild_id)
+async def connect_to_voice(b):
+    guild_id = int(os.getenv("GUILD_ID", ""))
+    voice_channel_id = int(os.getenv("VOICE_CHANNEL_ID", ""))
+    guild = discord.utils.get(b.guilds, id=guild_id)
 
-        if not guild:
-            logger.error("Guild not found.")
-            return
+    if not guild:
+        logger.error("Guild not found.")
+        return
 
-        voice_channel = guild.get_channel(voice_channel_id)
-        if not isinstance(voice_channel, discord.VoiceChannel):
-            logger.error(f"Invalid or non-existent voice channel: {voice_channel_id}")
-            return
+    voice_channel = guild.get_channel(voice_channel_id)
+    if not isinstance(voice_channel, discord.VoiceChannel):
+        logger.error(f"Invalid or non-existent voice channel: {voice_channel_id}")
+        return
 
-        # Check existing connections in the guild
-        current_vc = next((vc for vc in b.voice_clients if vc.guild == guild), None)
+    # Check existing connections in the guild
+    current_vc = next((vc for vc in b.voice_clients if vc.guild == guild), None)
 
-        try:
-            if not current_vc:
-                await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
-                logger.info(f"Connected to {voice_channel.name}")
+    try:
+        if not current_vc:
+            await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
+            logger.info(f"Connected to {voice_channel.name}")
+        else:
+            # Check if already connected to the correct channel
+            if current_vc.channel.id != voice_channel.id:
+                # Move existing client or reconnect?
+                try:
+                    await current_vc.move_to(voice_channel)  # Attempt move first
+                    logger.info(f"Moved to {voice_channel.name}")
+                except discord.errors.InvalidData as e:
+                    logger.error(f"Move failed: {e}. Reconnecting...")
+                    await current_vc.disconnect()
+                    await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
             else:
-                # Check if already connected to the correct channel
-                if current_vc.channel.id != voice_channel.id:
-                    # Move existing client or reconnect?
-                    try:
-                        await current_vc.move_to(voice_channel)  # Attempt move first
-                        logger.info(f"Moved to {voice_channel.name}")
-                    except discord.errors.InvalidData as e:
-                        logger.error(f"Move failed: {e}. Reconnecting...")
-                        await current_vc.disconnect()
-                        await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
-                else:
-                    logger.debug("Already connected to the correct channel.")
-        except Exception as e:
-            logger.exception(f"Connection error: {str(e)}")
+                logger.debug("Already connected to the correct channel.")
+    except Exception as e:
+        logger.exception(f"Connection error: {str(e)}")

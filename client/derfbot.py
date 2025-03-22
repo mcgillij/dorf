@@ -16,17 +16,23 @@ from workers.voice_queue_processor import monitor_response_queue, monitor_nic_re
 async def on_ready():
     logger.info(f"Logged in as {bot.user.name}")
     await bot.wait_until_ready()
-    await nic_bot.wait_until_ready()
-    await connect_to_voice()
+    await connect_to_voice(bot)
     asyncio.create_task(mimic_audio_task())
-    asyncio.create_task(mimic_nic_audio_task())
     asyncio.create_task(playback_task())
-    asyncio.create_task(playback_nic_task())
     asyncio.create_task(process_response_queue())
-    asyncio.create_task(process_nic_response_queue())
     asyncio.create_task(process_summarizer_queue())
-    asyncio.create_task(process_nic_summarizer_queue())
     asyncio.create_task(monitor_response_queue())
+    logger.info("done kicking off the bot")
+
+@nic_bot.event
+async def on_ready():
+    logger.info(f"Logged in as {nic_bot.user.name}")
+    await nic_bot.wait_until_ready()
+    await connect_to_voice(nic_bot)
+    asyncio.create_task(mimic_nic_audio_task())
+    asyncio.create_task(playback_nic_task())
+    asyncio.create_task(process_nic_response_queue())
+    asyncio.create_task(process_nic_summarizer_queue())
     asyncio.create_task(monitor_nic_response_queue())
     logger.info("done kicking off the bot")
 

@@ -8,7 +8,7 @@ from bot.utilities import logger
 
 from dotenv import load_dotenv
 
-from bot.utilities import split_message, split_text, derf_bot, nicole_bot
+from bot.utilities import split_message, derf_bot, nicole_bot
 from bot.commands import (
     poll_redis_for_key,
     LONG_RESPONSE_THRESHOLD,
@@ -29,7 +29,7 @@ CHAT_CHANNEL_ID = int(os.getenv("CHAT_CHANNEL_ID", ""))
 async def monitor_nic_response_queue():
     """Monitor the Redis voice response queue for new items."""
 
-    logger.info("Monitoring voice response queue...")
+    logger.info("Nic: Monitoring voice response queue...")
     while True:
         try:
             # Fetch an item from the Redis response queue
@@ -38,7 +38,7 @@ async def monitor_nic_response_queue():
                 await asyncio.sleep(1)  # No items in the queue, wait and retry
                 continue
 
-            logger.info(f"Received voice queued item: {queued_item}")
+            logger.info(f"Nic: Received voice queued item: {queued_item}")
 
             # Parse the queued item
             data = json.loads(queued_item)
@@ -55,7 +55,7 @@ async def monitor_nic_response_queue():
             # Fetch the channel
             channel = nic_bot.get_channel(fallback_channel_id)
             if not channel:
-                logger.info(f"Channel {fallback_channel_id} not found.")
+                logger.info(f"Nic: Channel {fallback_channel_id} not found.")
                 continue
             guild = channel.guild
             # send the question the user asked to back to the chat before processing response
@@ -81,7 +81,7 @@ async def monitor_nic_response_queue():
                 if guild.voice_client and guild.voice_client.channel
                 else 0
             )
-            logger.info(f"Number of users in voice channel: {voice_user_count}")
+            logger.info(f"Nic: Number of users in voice channel: {voice_user_count}")
 
             # Summarize response if it's long
             if len(response) > LONG_RESPONSE_THRESHOLD:
@@ -93,15 +93,15 @@ async def monitor_nic_response_queue():
 
                 await channel.send(summary_response)
                 await process_nic_audio_queue(
-                    unique_id, split_text(summary_response), voice_user_count
+                    unique_id, summary_response, voice_user_count
                 )
             else:
                 await process_nic_audio_queue(
-                    unique_id, split_text(response), voice_user_count
+                    unique_id, response, voice_user_count
                 )
 
         except Exception as e:
-            logger.error(f"Error in monitor_response_queue: {e}")
+            logger.error(f"Nic: Error in monitor_response_queue: {e}")
             await asyncio.sleep(1)  # Avoid spamming on continuous errors
 
 @tasks.loop(seconds=1)
@@ -172,11 +172,11 @@ async def monitor_response_queue():
 
                 await channel.send(summary_response)
                 await process_audio_queue(
-                    unique_id, split_text(summary_response), voice_user_count
+                    unique_id, summary_response, voice_user_count
                 )
             else:
                 await process_audio_queue(
-                    unique_id, split_text(response), voice_user_count
+                    unique_id, response, voice_user_count
                 )
 
         except Exception as e:

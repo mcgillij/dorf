@@ -31,7 +31,7 @@ async def playback_nic_task():
             # Fetch the voice channel by ID
             channel = nic_bot.get_channel(VOICE_CHANNEL_ID)
             if not channel or not isinstance(channel, discord.VoiceChannel):
-                logger.info(f"Voice channel {VOICE_CHANNEL_ID} not found or invalid.")
+                logger.info(f"Nic: Voice channel {VOICE_CHANNEL_ID} not found or invalid.")
                 continue
 
             # Get the voice client for the guild
@@ -39,18 +39,18 @@ async def playback_nic_task():
             voice_client = discord.utils.get(nic_bot.voice_clients, guild=guild)
 
             if not voice_client or not voice_client.is_connected():
-                logger.info("Voice client not connected. Attempting to reconnect...")
+                logger.info("Nic: Voice client not connected. Attempting to reconnect...")
                 try:
                     voice_client = await channel.connect()
                 except discord.ClientException as e:
-                    logger.error(f"Error connecting to voice channel: {e}")
+                    logger.error(f"Nic: Error connecting to voice channel: {e}")
                     continue
 
             # Check the number of users in the voice channel
             num_users = len(channel.members) - 1  # Subtract 1 for the bot itself
             if num_users < 1:
                 logger.info(
-                    f"Skipping playback as there are only {num_users} users in the voice channel."
+                    f"Nic: Skipping playback as there are only {num_users} users in the voice channel."
                 )
                 continue
 
@@ -60,7 +60,7 @@ async def playback_nic_task():
             )
             voice_client.play(
                 audio_source,
-                after=lambda e: logger.error(f"Player error: {e}") if e else None,
+                after=lambda e: logger.error(f"Nic: Player error: {e}") if e else None,
             )
 
             # Wait for the audio to finish playing
@@ -72,7 +72,7 @@ async def playback_nic_task():
                 os.remove(opus_path)
 
         except Exception as e:
-            logger.error(f"Error in playback_task: {e}")
+            logger.error(f"Nic: Error in playback_task: {e}")
             await asyncio.sleep(1)  # Avoid spamming on continuous errors
 
 async def playback_task():
