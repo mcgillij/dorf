@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 #split_text,
 from bot.utilities import (
     split_message,
+    split_text,
     generate_unique_id,
     poll_redis_for_key,
     filtered_responses,

@@ -93,11 +93,11 @@ async def monitor_nic_response_queue():
 
                 await channel.send(summary_response)
                 await process_nic_audio_queue(
-                    unique_id, summary_response, voice_user_count
+                    unique_id, [summary_response], voice_user_count
                 )
             else:
                 await process_nic_audio_queue(
-                    unique_id, response, voice_user_count
+                    unique_id, [response], voice_user_count
                 )
 
         except Exception as e:
@@ -172,11 +172,11 @@ async def monitor_response_queue():
 
                 await channel.send(summary_response)
                 await process_audio_queue(
-                    unique_id, summary_response, voice_user_count
+                    unique_id, [summary_response], voice_user_count
                 )
             else:
                 await process_audio_queue(
-                    unique_id, response, voice_user_count
+                    unique_id, [response], voice_user_count
                 )
 
         except Exception as e:
