@@ -13,6 +13,7 @@ VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID", ""))
 
 redis_client = redis.Redis(host="0.0.0.0", port=6379, decode_responses=True)
 
+
 async def playback_nic_task():
     """
     Continuously process playback requests from the Redis queue.
@@ -31,7 +32,9 @@ async def playback_nic_task():
             # Fetch the voice channel by ID
             channel = nic_bot.get_channel(VOICE_CHANNEL_ID)
             if not channel or not isinstance(channel, discord.VoiceChannel):
-                logger.info(f"Nic: Voice channel {VOICE_CHANNEL_ID} not found or invalid.")
+                logger.info(
+                    f"Nic: Voice channel {VOICE_CHANNEL_ID} not found or invalid."
+                )
                 continue
 
             # Get the voice client for the guild
@@ -39,20 +42,23 @@ async def playback_nic_task():
             voice_client = discord.utils.get(nic_bot.voice_clients, guild=guild)
 
             if not voice_client or not voice_client.is_connected():
-                logger.info("Nic: Voice client not connected. Attempting to reconnect...")
+                logger.info(
+                    "Nic: Voice client not connected. Attempting to reconnect..."
+                )
                 try:
                     voice_client = await channel.connect()
                 except discord.ClientException as e:
                     logger.error(f"Nic: Error connecting to voice channel: {e}")
                     continue
 
-            # Check the number of users in the voice channel
-            num_users = len(channel.members) - 1  # Subtract 1 for the bot itself
-            if num_users < 1:
+            # Check to make sure there's humans in the voice chat
+            has_humans = any(not member.bot for member in channel.members)
+
+            if not has_humans:
                 logger.info(
-                    f"Nic: Skipping playback as there are only {num_users} users in the voice channel."
+                    f"Skipping playback as there are only bots in {channel.name}."
                 )
-                continue
+                continue  # Skip to the next iteration
 
             # Play the generated audio
             audio_source = await discord.FFmpegOpusAudio.from_probe(
@@ -74,6 +80,7 @@ async def playback_nic_task():
         except Exception as e:
             logger.error(f"Nic: Error in playback_task: {e}")
             await asyncio.sleep(1)  # Avoid spamming on continuous errors
+
 
 async def playback_task():
     """
@@ -108,13 +115,14 @@ async def playback_task():
                     logger.error(f"Error connecting to voice channel: {e}")
                     continue
 
-            # Check the number of users in the voice channel
-            num_users = len(channel.members) - 1  # Subtract 1 for the bot itself
-            if num_users < 1:
+            # Check to see if there's any humans in the channel
+            has_humans = any(not member.bot for member in channel.members)
+
+            if not has_humans:
                 logger.info(
-                    f"Skipping playback as there are only {num_users} users in the voice channel."
+                    f"Skipping playback as there are only bots in {channel.name}."
                 )
-                continue
+                continue  # Skip to the next iteration
 
             # Play the generated audio
             audio_source = await discord.FFmpegOpusAudio.from_probe(

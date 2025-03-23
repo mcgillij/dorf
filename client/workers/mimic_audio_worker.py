@@ -105,7 +105,9 @@ async def mimic_nic_audio_task():
     output_dir = "/home/j/dorf/client/output/"
     loop = asyncio.get_event_loop()  # Reuse the same event loop
     while True:
-        task_data = await loop.run_in_executor(None, redis_client.rpop, "audio_nic_queue")
+        task_data = await loop.run_in_executor(
+            None, redis_client.rpop, "audio_nic_queue"
+        )
 
         if not task_data:
             await asyncio.sleep(1)
@@ -161,8 +163,12 @@ async def mimic_nic_audio_task():
 
             # Push to playback queue without blocking
             await loop.run_in_executor(
-                None, redis_client.lpush, "playback_nic_queue", f"{unique_id}|{opus_path}"
+                None,
+                redis_client.lpush,
+                "playback_nic_queue",
+                f"{unique_id}|{opus_path}",
             )
+
 
 async def mimic_audio_task():
     output_dir = "/home/j/dorf/client/output/"

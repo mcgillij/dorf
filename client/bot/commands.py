@@ -7,7 +7,7 @@ import discord
 from discord.ext import commands, voice_recv
 from dotenv import load_dotenv
 
-#split_text,
+# split_text,
 from bot.utilities import (
     split_message,
     split_text,
@@ -51,6 +51,7 @@ async def queue_message_processing(ctx, message: str):
     )
     return unique_id
 
+
 async def queue_nic_message_processing(ctx, message: str):
     unique_id = generate_unique_id(ctx, message)
     logger.info(f"Nic: Unique ID: {unique_id}")
@@ -73,10 +74,11 @@ async def process_response(ctx, unique_id: str):
     for response_chunk in split_message(response, 2000):
         await ctx.send(response_chunk)
     # Check for voice channel users
-    voice_user_count = (
-        len(ctx.guild.voice_client.channel.members) - 1 if ctx.guild.voice_client else 0
+    human_in_voice_channel = bool(
+        ctx.guild.voice_client
+        and any(not member.bot for member in ctx.guild.voice_client.channel.members)
     )
-    logger.info(f"Number of users in voice channel: {voice_user_count}")
+    logger.info(f"Are there users in voice chat?: {human_in_voice_channel}")
     # Summarize response if it's long
     if len(response) > LONG_RESPONSE_THRESHOLD:
         redis_client.lpush(
@@ -86,15 +88,13 @@ async def process_response(ctx, unique_id: str):
         summary_key = f"summarizer:{unique_id}"
         summary_response = await poll_redis_for_key(summary_key)
         await ctx.send(summary_response)
-        await process_audio_queue(
-            unique_id,
-            [summary_response],
-            voice_user_count,
-            # unique_id, split_text(summary_response), voice_user_count  # don't have to split here with kokoro (only with mimic)
-        )
+        if human_in_voice_channel:
+            await process_audio_queue(unique_id, [summary_response])
     else:
-        await process_audio_queue(unique_id, [response], voice_user_count)
+        if human_in_voice_channel:
+            await process_audio_queue(unique_id, [response])
         # await process_audio_queue(unique_id, split_text(response), voice_user_count)  # no splitting with kokoro
+
 
 async def process_nic_response(ctx, unique_id: str):
     # Poll Redis for the result
@@ -104,10 +104,11 @@ async def process_nic_response(ctx, unique_id: str):
     for response_chunk in split_message(response, 2000):
         await ctx.send(response_chunk)
     # Check for voice channel users
-    voice_user_count = (
-        len(ctx.guild.voice_client.channel.members) - 1 if ctx.guild.voice_client else 0
+    human_in_voice_channel = bool(
+        ctx.guild.voice_client
+        and any(not member.bot for member in ctx.guild.voice_client.channel.members)
     )
-    logger.info(f"Number of users in voice channel: {voice_user_count}")
+    logger.info(f"Nic: Are there users in voice chat?: {human_in_voice_channel}")
     # Summarize response if it's long
     if len(response) > LONG_RESPONSE_THRESHOLD:
         redis_client.lpush(
@@ -117,35 +118,27 @@ async def process_nic_response(ctx, unique_id: str):
         summary_key = f"summarizer_nic:{unique_id}"
         summary_response = await poll_redis_for_key(summary_key)
         await ctx.send(summary_response)
-        await process_nic_audio_queue(
-            unique_id,
-            [summary_response],
-            voice_user_count,
-            # unique_id, split_text(summary_response), voice_user_count  # don't have to split here with kokoro (only with mimic)
-        )
+        if human_in_voice_channel:
+            await process_nic_audio_queue(unique_id, [summary_response])
     else:
-        await process_nic_audio_queue(unique_id, [response], voice_user_count)
-        # await process_audio_queue(unique_id, split_text(response), voice_user_count)  # no splitting with kokoro
+        if human_in_voice_channel:
+            await process_nic_audio_queue(unique_id, [response])
 
-async def process_audio_queue(
-    unique_id: str, messages: list[str], voice_user_count: int
-):
-    """Queues messages for audio generation if users are in the voice channel."""
-    if voice_user_count > 0:
-        index = 1
-        for msg in messages:
-            redis_client.lpush("audio_queue", f"{unique_id}|{index}|{msg}")
-            index += 1
 
-async def process_nic_audio_queue(
-    unique_id: str, messages: list[str], voice_user_count: int
-):
+async def process_audio_queue(unique_id: str, messages: list[str]):
     """Queues messages for audio generation if users are in the voice channel."""
-    if voice_user_count > 0:
-        index = 1
-        for msg in messages:
-            redis_client.lpush("audio_nic_queue", f"{unique_id}|{index}|{msg}")
-            index += 1
+    index = 1
+    for msg in messages:
+        redis_client.lpush("audio_queue", f"{unique_id}|{index}|{msg}")
+        index += 1
+
+
+async def process_nic_audio_queue(unique_id: str, messages: list[str]):
+    """Queues messages for audio generation if users are in the voice channel."""
+    index = 1
+    for msg in messages:
+        redis_client.lpush("audio_nic_queue", f"{unique_id}|{index}|{msg}")
+        index += 1
 
 
 # Command to handle messages
@@ -159,10 +152,28 @@ async def derf(ctx, *, message: str):
     unique_id = await queue_message_processing(ctx, message)
     await process_response(ctx, unique_id)
 
+
 @nic_bot.command()
 async def nic(ctx, *, message: str):
     unique_id = await queue_nic_message_processing(ctx, message)
     await process_nic_response(ctx, unique_id)
+
+
+@bot.command()
+async def check_bots(ctx):
+    # Ensure the user is in a voice channel
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        return await ctx.send("You must be in a voice channel first.")
+
+    channel = ctx.author.voice.channel
+    bots = [member for member in channel.members if member.bot]
+
+    if bots:
+        bot_names = ", ".join([m.name for m in bots])
+        await ctx.send(f"Bots found: {bot_names}")
+    else:
+        await ctx.send("No bots detected here.")
+
 
 @nic_bot.event
 @bot.event
@@ -193,7 +204,9 @@ async def on_voice_state_update(member, before, after):
             await start_capture(member.guild, after.channel)
 
         # Handle self mute/deaf changes
-        if (before.self_mute != after.self_mute) or (before.self_deaf != after.self_deaf):
+        if (before.self_mute != after.self_mute) or (
+            before.self_deaf != after.self_deaf
+        ):
             vc = member.guild.voice_client
             if vc and vc.is_listening():
                 logger.info(f"Voice state changed for {member}")

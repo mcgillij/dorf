@@ -25,6 +25,7 @@ redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=Tr
 
 CHAT_CHANNEL_ID = int(os.getenv("CHAT_CHANNEL_ID", ""))
 
+
 @tasks.loop(seconds=1)
 async def monitor_nic_response_queue():
     """Monitor the Redis voice response queue for new items."""
@@ -76,12 +77,13 @@ async def monitor_nic_response_queue():
                 await channel.send(response_chunk)
 
             # Check for voice channel users
-            voice_user_count = (
-                len(guild.voice_client.channel.members) - 1
-                if guild.voice_client and guild.voice_client.channel
-                else 0
+            human_in_voice_channel = bool(
+                ctx.guild.voice_client
+                and any(
+                    not member.bot for member in ctx.guild.voice_client.channel.members
+                )
             )
-            logger.info(f"Nic: Number of users in voice channel: {voice_user_count}")
+            logger.info(f"Nic: human in voice channel: {human_in_voice_channel}")
 
             # Summarize response if it's long
             if len(response) > LONG_RESPONSE_THRESHOLD:
@@ -92,17 +94,16 @@ async def monitor_nic_response_queue():
                 summary_response = await poll_redis_for_key(f"summarizer:{unique_id}")
 
                 await channel.send(summary_response)
-                await process_nic_audio_queue(
-                    unique_id, [summary_response], voice_user_count
-                )
+                if human_in_voice_channel:
+                    await process_nic_audio_queue(unique_id, [summary_response])
             else:
-                await process_nic_audio_queue(
-                    unique_id, [response], voice_user_count
-                )
+                if human_in_voice_channel:
+                    await process_nic_audio_queue(unique_id, [response])
 
         except Exception as e:
             logger.error(f"Nic: Error in monitor_response_queue: {e}")
             await asyncio.sleep(1)  # Avoid spamming on continuous errors
+
 
 @tasks.loop(seconds=1)
 async def monitor_response_queue():
@@ -155,12 +156,13 @@ async def monitor_response_queue():
                 await channel.send(response_chunk)
 
             # Check for voice channel users
-            voice_user_count = (
-                len(guild.voice_client.channel.members) - 1
-                if guild.voice_client and guild.voice_client.channel
-                else 0
+            human_in_voice_channel = bool(
+                ctx.guild.voice_client
+                and any(
+                    not member.bot for member in ctx.guild.voice_client.channel.members
+                )
             )
-            logger.info(f"Number of users in voice channel: {voice_user_count}")
+            logger.info(f"Human in voice channel: {human_in_voice_channel}")
 
             # Summarize response if it's long
             if len(response) > LONG_RESPONSE_THRESHOLD:
@@ -171,13 +173,11 @@ async def monitor_response_queue():
                 summary_response = await poll_redis_for_key(f"summarizer:{unique_id}")
 
                 await channel.send(summary_response)
-                await process_audio_queue(
-                    unique_id, [summary_response], voice_user_count
-                )
+                if human_in_voice_channel:
+                    await process_audio_queue(unique_id, [summary_response])
             else:
-                await process_audio_queue(
-                    unique_id, [response], voice_user_count
-                )
+                if human_in_voice_channel:
+                    await process_audio_queue(unique_id, [response])
 
         except Exception as e:
             logger.error(f"Error in monitor_response_queue: {e}")

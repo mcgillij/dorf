@@ -35,6 +35,7 @@ async def process_response_queue():
             logger.error(f"Error processing response queue: {e}")
             traceback.print_exc()
 
+
 async def process_nic_response_queue():
     """
     Continuously process requests for get_response from Redis queue.

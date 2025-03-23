@@ -32,6 +32,7 @@ async def process_summarizer_queue():
             logger.error(f"Error processing summarizer queue: {e}")
             traceback.print_exc()
 
+
 async def process_nic_summarizer_queue():
     """
     Continuously process requests for get_summarizer_response from Redis queue.
