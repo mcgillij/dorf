@@ -51,19 +51,24 @@ async def replace_userids(text: str) -> str:
     Returns:
         str: The processed text.
     """
-    # Regex to match Discord user mentions (e.g., <@123456789012345678>)
-    mention_pattern = r"<@!?(\d+)>"
-    mention_pattern_2 = r"@!?(\d+)"
+    # Regex to match Discord user mentions (e.g., <@123456789012345678> or <!@123456789012345678>)
+    mention_pattern = r"<@!?(?P<user_id>\d+)>"
+
+    # Regex to match standalone user IDs (e.g., 427590626905948165)
+    standalone_pattern = r"\b(?P<user_id>\d{17,19})\b"
 
     def replace_mention(match):
-        user_id = int(match.group(1))
+        user_id = int(match.group("user_id"))
         user = bot.get_user(user_id)
         return user.display_name if user else f"User{user_id}"
 
+    # Replace mentions using the correct pattern
     text = re.sub(mention_pattern, replace_mention, text)
-    text = re.sub(mention_pattern_2, replace_mention, text)
 
-    # Remove excess whitespace caused by emoji/mention removal
+    # Replace standalone user IDs
+    text = re.sub(standalone_pattern, replace_mention, text)
+
+    # Remove excess whitespace caused by mention removal
     return re.sub(r"\s+", " ", text).strip()
 
 
