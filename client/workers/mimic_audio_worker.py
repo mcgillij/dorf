@@ -53,6 +53,7 @@ async def replace_userids(text: str) -> str:
     """
     # Regex to match Discord user mentions (e.g., <@123456789012345678>)
     mention_pattern = r"<@!?(\d+)>"
+    mention_pattern_2 = r"@!?(\d+)"
 
     def replace_mention(match):
         user_id = int(match.group(1))
@@ -60,6 +61,7 @@ async def replace_userids(text: str) -> str:
         return user.display_name if user else f"User{user_id}"
 
     text = re.sub(mention_pattern, replace_mention, text)
+    text = re.sub(mention_pattern_2, replace_mention, text)
 
     # Remove excess whitespace caused by emoji/mention removal
     return re.sub(r"\s+", " ", text).strip()
