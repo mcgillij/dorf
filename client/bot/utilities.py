@@ -88,6 +88,41 @@ filtered_responses = [
 ]
 
 
+async def replace_userids(text: str) -> str:
+    logger.debug(f"{text=}")
+
+    async def replace_match(match):
+        user_id = int(match.group(1))
+        username = await sanitize_userid(user_id)
+        return username
+
+    # Find all matches and replace them asynchronously
+    async def process_matches(text, pattern):
+        matches = re.finditer(pattern, text)
+        replacements = []
+        last_end = 0
+        for match in matches:
+            replacements.append((match.start(), await replace_match(match)))
+            last_end = match.end()
+        if last_end < len(text):
+            replacements.append((last_end, text[last_end:]))
+        return replacements
+
+    # Process all patterns
+    patterns = [r"<@(\d+)>", r"@(\d+)", r"(\d+):", r"(\d+),"]
+    result = text
+    for pattern in patterns:
+        replacements = await process_matches(result, pattern)
+        result = "".join(replacement[1] for replacement in sorted(replacements))
+
+    logger.debug(f"{result=}")
+    return result
+
+
+async def sanitize_userid(user_id: int):
+    return f"<@{user_id}>"
+
+
 def filter_message(message: str) -> bool:
     return any(keyword.lower() in message.lower() for keyword in filtered_keywords)
 

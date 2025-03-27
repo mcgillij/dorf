@@ -16,6 +16,7 @@ from bot.utilities import (
     filtered_responses,
     filter_message,
     logger,
+    replace_userids,
 )
 from bot.audio_capture import RingBufferAudioSink, VoiceRecvClient
 
@@ -72,7 +73,8 @@ async def process_response(ctx, unique_id: str):
     response = await poll_redis_for_key(key)
     # Send the response in chunks
     for response_chunk in split_message(response, 2000):
-        await ctx.send(response_chunk)
+        processed_chunk = await replace_userids(response)
+        await ctx.send(processed_chunk)
     # Check for voice channel users
     human_in_voice_channel = bool(
         ctx.guild.voice_client
@@ -87,13 +89,13 @@ async def process_response(ctx, unique_id: str):
         )
         summary_key = f"summarizer:{unique_id}"
         summary_response = await poll_redis_for_key(summary_key)
-        await ctx.send(summary_response)
+        processed_summary = await replace_userids(summary_response)
+        await ctx.send(processed_summary)
         if human_in_voice_channel:
             await process_audio_queue(unique_id, [summary_response])
     else:
         if human_in_voice_channel:
             await process_audio_queue(unique_id, [response])
-        # await process_audio_queue(unique_id, split_text(response), voice_user_count)  # no splitting with kokoro
 
 
 async def process_nic_response(ctx, unique_id: str):
@@ -102,7 +104,8 @@ async def process_nic_response(ctx, unique_id: str):
     response = await poll_redis_for_key(key)
     # Send the response in chunks
     for response_chunk in split_message(response, 2000):
-        await ctx.send(response_chunk)
+        processed_chunk = await replace_userids(response)
+        await ctx.send(processed_chunk)
     # Check for voice channel users
     human_in_voice_channel = bool(
         ctx.guild.voice_client
@@ -117,7 +120,8 @@ async def process_nic_response(ctx, unique_id: str):
         )
         summary_key = f"summarizer_nic:{unique_id}"
         summary_response = await poll_redis_for_key(summary_key)
-        await ctx.send(summary_response)
+        processed_summary = await replace_userids(summary_response)
+        await ctx.send(processed_summary)
         if human_in_voice_channel:
             await process_nic_audio_queue(unique_id, [summary_response])
     else:
