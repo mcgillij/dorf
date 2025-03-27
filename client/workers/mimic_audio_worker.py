@@ -54,22 +54,43 @@ async def replace_userids(text: str) -> str:
     # Regex to match Discord user mentions (e.g., <@123456789012345678> or <!@123456789012345678>)
     mention_pattern = r"<@!?(?P<user_id>\d+)>"
 
-    # Regex to match standalone user IDs (e.g., 427590626905948165)
-    standalone_pattern = r"\b(?P<user_id>\d{17,19})\b"
+    # Regex to match standalone user IDs (e.g., 427590626905948165 or 427590626905948165:)
+    standalone_pattern = r"\b(?P<user_id>\d{17,19})(?::)?\b"
 
-    def replace_mention(match):
+    # Regex to match user IDs with @ prefix (e.g., @123456789012345678)
+    at_prefix_pattern = r"@(?P<user_id>\d+)"
+
+    async def replace_mention(match):
         user_id = int(match.group("user_id"))
-        user = bot.get_user(user_id)
-        return user.display_name if user else f"User{user_id}"
+        logging.debug(f"Found user ID: {user_id}")
+        try:
+            user = await bot.fetch_user(user_id)  # Fetch user from Discord
+            if user:
+                logging.debug(f"User found: {user.display_name}")
+                return user.display_name
+            else:
+                logging.warning(f"User not found for ID: {user_id}")
+                return f"User{user_id}"
+        except Exception as e:
+            logging.error(f"Error fetching user with ID {user_id}: {e}")
+            return f"User{user_id}"
 
-    # Replace mentions using the correct pattern
-    text = re.sub(mention_pattern, replace_mention, text)
+    # Combine all patterns into one replacement step
+    combined_pattern = re.compile(f"{mention_pattern}|{standalone_pattern}|{at_prefix_pattern}")
 
-    # Replace standalone user IDs
-    text = re.sub(standalone_pattern, replace_mention, text)
+    # Split the text into words and process each word separately
+    words = text.split()
+    processed_words = []
+    for word in words:
+        # Use a loop to apply the async function to each match
+        def sync_replace(match):
+            return bot.loop.run_until_complete(replace_mention(match))
+        
+        processed_word = combined_pattern.sub(sync_replace, word)
+        processed_words.append(processed_word)
 
-    # Remove excess whitespace caused by mention removal
-    return re.sub(r"\s+", " ", text).strip()
+    # Join the processed words back into a single string
+    return ' '.join(processed_words).strip()
 
 
 async def run_mimic3_subprocess(output_dir, text_file_path):
