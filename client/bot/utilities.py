@@ -14,11 +14,17 @@ dotenv.load_dotenv()
 
 timeout = aiohttp.ClientTimeout(total=120)
 
-logger = logging.getLogger(__name__)
-FORMAT = "%(asctime)s - %(message)s"
-logging.basicConfig(format=FORMAT)
-logger.addHandler(logging.FileHandler("derf.log"))
-logger.setLevel(logging.DEBUG)
+
+def setup_logger(name: str) -> logging.Logger:
+    logger = logging.getLogger(name)
+    FORMAT = "%(asctime)s - %(message)s"
+    logging.basicConfig(format=FORMAT)
+    logger.addHandler(logging.FileHandler("derf.log"))
+    logger.setLevel(logging.DEBUG)
+    return logger
+
+
+logger = setup_logger("bot.utilities")
 
 # Constants for API interaction
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")

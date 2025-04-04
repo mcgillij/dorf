@@ -1,12 +1,8 @@
 import sqlite3
 from datetime import datetime
-import logging
+from bot.utilities import setup_logger
 
-logger = logging.getLogger(__name__)
-FORMAT = "%(asctime)s - %(message)s"
-logging.basicConfig(format=FORMAT)
-logger.addHandler(logging.FileHandler("derf.log"))
-logger.setLevel(logging.DEBUG)
+logger = setup_logger("derf")
 
 
 class SQLiteDB:
