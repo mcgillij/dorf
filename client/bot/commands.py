@@ -1,5 +1,7 @@
 import os
 from random import choice
+import asyncio
+from asyncio import run_coroutine_threadsafe
 
 import discord
 from discord.ext import commands, voice_recv
@@ -34,19 +36,49 @@ INTENTS.members = True
 bot = commands.Bot(command_prefix="!", intents=INTENTS)
 nic_bot = commands.Bot(command_prefix="#", intents=INTENTS)
 
+# message queue to not get rate limited hopefully by discord
+message_queue = asyncio.Queue()
+
+
+# Background task to process the queue
+async def message_dispatcher():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        channel, content = await message_queue.get()
+        try:
+            await channel.send(content)
+        except Exception as e:
+            print(f"Failed to send message: {e}")
+        await asyncio.sleep(1)  # Adjust this to control rate
+
+
+# Enqueue a message
+def enqueue_message(channel, content):
+    message_queue.put_nowait((channel, content))
+
 
 # Command to handle messages
 @bot.command()
 async def search(ctx, *, message: str):
-    async def progress_update_callback(param=None):
+
+    loop = asyncio.get_event_loop()  # Or pass it in beforehand to be safe
+
+    def progress_update_callback(param=None):
         if param:
-            logger.info(f"Progress update: {param}")
-            await ctx.send("Processing your request...")
+            logger.info(
+                f"######### IN THE CALLBACK ###################### Progress update: {param}"
+            )
+            enqueue_message(ctx.channel, f"{param}")
+            # run_coroutine_threadsafe(ctx.send(f"{param}"), loop)
+            # asyncio.create_task(ctx.send(f"{param}"))
+            # await ctx.send(f"{param}")
+        else:
+            logger.info("############ In callback but param empty ########")
 
     results = await search_with_tool(message, progress_update_callback)
     messages = split_message(results)
     for m in messages:
-        await ctx.send(m)
+        enqueue_message(ctx.channel, m)
 
 
 @bot.command()

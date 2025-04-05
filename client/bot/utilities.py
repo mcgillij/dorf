@@ -143,7 +143,10 @@ async def poll_redis_for_key(key: str, timeout: float = 0.5) -> str:
 
 def split_message(message: str, max_length: int = 2000) -> list[str]:
     """Splits a message into chunks of a maximum length."""
-    return [message[i : i + max_length] for i in range(0, len(message), max_length)]
+    if message:
+        return [message[i : i + max_length] for i in range(0, len(message), max_length)]
+    else:
+        return []
 
 
 class DerfBot:

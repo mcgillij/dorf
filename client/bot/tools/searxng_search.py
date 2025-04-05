@@ -5,9 +5,10 @@ from bot.log_config import setup_logger
 
 logger = setup_logger(__name__)
 SEARCH_URL = "https://searx.mcgillij.dev"
+RELEVANT_THRESHOLD = 0.5
 
 
-async def search_internet(q: str) -> List[Dict]:
+async def search_internet(q: str, callback=None) -> List[Dict]:
     """search the internet for the top results of a query, to be used when llm is unfamiliar with a topic"""
     logger.info(f"Searching the internet for: {q}")
     url = SEARCH_URL
@@ -24,16 +25,34 @@ async def search_internet(q: str) -> List[Dict]:
                 data = json.loads(data)
                 # Print the content of the results
                 results = []
+                source_num = 0
                 for result in data.get("results", []):
-                    results.append(
-                        {
-                            "url": result.get("url"),
-                            "title": result.get("title"),
-                            "score": result.get("score"),
-                            "content": result.get("content"),
-                        }
-                    )
+
+                    title = result.get("title")
+                    url = result.get("url")
+                    score = result.get("score")
+                    content = result.get("content")
+
+                    if score > RELEVANT_THRESHOLD:
+                        source_num += 1
+                        discord_formatted_message = (
+                            f"Researching [**{source_num}**]: [{title}](<{url}>)"
+                        )
+                        callback(param=discord_formatted_message)
+                        logger.info(
+                            f"------------------ Entering search result for {title}"
+                        )
+                        results.append(
+                            {
+                                "url": url,
+                                "title": title,
+                                "score": score,
+                                "content": content,
+                            }
+                        )
+                    else:
+                        logger.info("Skipping search result score TOO LOW")
                 return results
             else:
-                print(f"Failed to retrieve data. Status code: {response.status}")
+                logger.info(f"Failed to retrieve data. Status code: {response.status}")
                 return []

@@ -7,14 +7,7 @@ from bot.tools.searxng_search import search_internet
 from bot.log_config import setup_logger
 
 logger = setup_logger(__name__)
-MAX_PREDICTION_ROUNDS = 7
-
-
-# Tool defs
-def search_tool(query: str) -> List[Dict]:
-    """Searches the internet for a given query"""
-    logger.info("Searching the internet for: %s", query)
-    return asyncio.run(search_internet(query))
+MAX_PREDICTION_ROUNDS = 10
 
 
 async def wrap_model_act(model, query, tools, on_message=None, callback=None) -> str:
@@ -25,7 +18,8 @@ async def wrap_model_act(model, query, tools, on_message=None, callback=None) ->
     search_results = []
 
     def append_search(param):
-        print(f"Appending: {param=}")
+        logger.info(f"-----------------------> Appending: {param=}")
+        # callback(param=param)
         search_results.append(param)
 
     await loop.run_in_executor(
@@ -34,20 +28,29 @@ async def wrap_model_act(model, query, tools, on_message=None, callback=None) ->
             query,
             tools,
             on_message=append_search,
-            max_prediction_rounds=MAX_PREDICTION_ROUNDS,
-            on_round_start=print,
-            on_round_end=print,
-            on_prediction_completed=callback,
+            # max_prediction_rounds=MAX_PREDICTION_ROUNDS,
+            # on_round_start=callback,
+            # on_round_end=callback,
+            # on_prediction_completed=callback,
         ),
     )
-    logger.info(f"{search_results=}")
-    parsed_result = parse_search_result(search_results)
+    logger.info(f"********************** {search_results=}")
+    parsed_result = parse_all_texts(search_results)
+    # parsed_result = parse_search_result(search_results)
 
+    logger.info(f"********************** {parsed_result=}")
     return parsed_result
 
 
 async def search_with_tool(query: str, callback) -> str:
     """Searches the internet for a given query"""
+
+    # Tool defs
+    def search_tool(query: str) -> List[Dict]:
+        """Searches the internet for a given query"""
+        logger.info("Searching the internet for: %s", query)
+        return asyncio.run(search_internet(query, callback=callback))
+
     logger.info("Searching the internet for: %s", query)
     model = (
         lms.llm()
@@ -55,32 +58,28 @@ async def search_with_tool(query: str, callback) -> str:
     logger.info("model loaded")
     response = await wrap_model_act(
         model,
-        query + " add the sources as links at the end",
+        query
+        + " always use your search_tool and add the sources as links at the end, give your response in text, never JSON",
         [search_tool],
         callback=callback,
     )
     return response
 
 
-def parse_search_result(search_results: List) -> str:
-    for item in search_results:
-        # Convert the object to a dictionary if it is not already one
-        if hasattr(item, "to_dict"):
-            item = item.to_dict()
+def parse_all_texts(search_results: list) -> str:
+    results = []
+    for msg in search_results:
+        content = getattr(msg, "content", None)
+        if not content:
+            continue
 
-        if "content" in item:
-            for content_item in item["content"]:
-                if "text" in content_item:
-                    text_value = content_item["text"]
-                    if text_value != "":
-                        return text_value
+        for part in content:
+            text = getattr(part, "text", None)
+            if (
+                text
+                and "json" not in text.lower()
+                and "function call" not in text.lower()
+            ):
+                results.append(text.strip())
 
-
-if __name__ == "__main__":
-    # Example usage
-    query = "What is the newest assassins creed game?"
-    results = search_tool(query)
-    print("Search results:", results)
-
-    # Example usage with async
-    asyncio.run(search_with_tool(query))
+    return "\n\n".join(results) if results else "No valid response found."

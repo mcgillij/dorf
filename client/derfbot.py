@@ -3,7 +3,7 @@
 import os
 import asyncio
 
-from bot.commands import bot, nic_bot, connect_to_voice
+from bot.commands import bot, nic_bot, connect_to_voice, message_dispatcher
 from bot.utilities import setup_logger
 from bot.workers.process_response_worker import (
     process_response_queue,
@@ -34,6 +34,7 @@ async def on_ready():
     asyncio.create_task(process_response_queue())
     asyncio.create_task(process_summarizer_queue())
     asyncio.create_task(monitor_response_queue())
+    asyncio.create_task(message_dispatcher())
     logger.info("done kicking off the bot")
 
     logger.info(f"Logged in as {nic_bot.user.name}")
