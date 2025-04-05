@@ -38,7 +38,12 @@ nic_bot = commands.Bot(command_prefix="#", intents=INTENTS)
 # Command to handle messages
 @bot.command()
 async def search(ctx, *, message: str):
-    results = await search_with_tool(message)
+    async def progress_update_callback(param=None):
+        if param:
+            logger.info(f"Progress update: {param}")
+            await ctx.send("Processing your request...")
+
+    results = await search_with_tool(message, progress_update_callback)
     messages = split_message(results)
     for m in messages:
         await ctx.send(m)

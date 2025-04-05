@@ -7,7 +7,7 @@ from bot.tools.searxng_search import search_internet
 from bot.log_config import setup_logger
 
 logger = setup_logger(__name__)
-MAX_PREDICTION_ROUNDS = 5
+MAX_PREDICTION_ROUNDS = 7
 
 
 # Tool defs
@@ -17,7 +17,7 @@ def search_tool(query: str) -> List[Dict]:
     return asyncio.run(search_internet(query))
 
 
-async def wrap_model_act(model, query, tools, on_message=None) -> str:
+async def wrap_model_act(model, query, tools, on_message=None, callback=None) -> str:
     """Wrap a synchronous call in an async context if necessary."""
     logger.info("in the wrapper")
     loop = asyncio.get_event_loop()
@@ -37,7 +37,7 @@ async def wrap_model_act(model, query, tools, on_message=None) -> str:
             max_prediction_rounds=MAX_PREDICTION_ROUNDS,
             on_round_start=print,
             on_round_end=print,
-            on_prediction_completed=print,
+            on_prediction_completed=callback,
         ),
     )
     logger.info(f"{search_results=}")
@@ -46,7 +46,7 @@ async def wrap_model_act(model, query, tools, on_message=None) -> str:
     return parsed_result
 
 
-async def search_with_tool(query: str) -> str:
+async def search_with_tool(query: str, callback) -> str:
     """Searches the internet for a given query"""
     logger.info("Searching the internet for: %s", query)
     model = (
@@ -55,8 +55,9 @@ async def search_with_tool(query: str) -> str:
     logger.info("model loaded")
     response = await wrap_model_act(
         model,
-        query + " add the sources at the end that you used 'url/title' and format the message for discord",
+        query + " add the sources as links at the end",
         [search_tool],
+        callback=callback,
     )
     return response
 
