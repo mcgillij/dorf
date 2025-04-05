@@ -7,7 +7,7 @@ from bot.tools.searxng_search import search_internet
 from bot.log_config import setup_logger
 
 logger = setup_logger(__name__)
-MAX_PREDICTION_ROUNDS = 5
+MAX_PREDICTION_ROUNDS = 7
 
 
 # Tool defs
@@ -55,7 +55,7 @@ async def search_with_tool(query: str) -> str:
     logger.info("model loaded")
     response = await wrap_model_act(
         model,
-        query + " add the sources at the end that you used 'url/title' and format the message for discord",
+        query + " add the sources as links at the end",
         [search_tool],
     )
     return response
