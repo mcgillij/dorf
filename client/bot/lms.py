@@ -28,8 +28,7 @@ async def wrap_model_act(model, query, tools, on_message=None) -> str:
         print(f"Appending: {param=}")
         search_results.append(param)
 
-    # result = await loop.run_in_executor(None, lambda: model.respond(query, tools, on_message=on_message))
-    result = await loop.run_in_executor(
+    await loop.run_in_executor(
         None,
         lambda: model.act(
             query,
@@ -56,8 +55,7 @@ async def search_with_tool(query: str) -> str:
     logger.info("model loaded")
     response = await wrap_model_act(
         model,
-        query
-        + " Show the sources they are provided as 'url/title' in the results, format the message as discord message markdown",
+        query + " add the sources at the end that you used 'url/title' and format the message for discord",
         [search_tool],
     )
     return response
