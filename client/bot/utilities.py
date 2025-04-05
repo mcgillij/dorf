@@ -8,23 +8,14 @@ import asyncio
 import traceback
 import redis
 import hashlib
-import logging
+from bot.log_config import setup_logger
 
 dotenv.load_dotenv()
 
 timeout = aiohttp.ClientTimeout(total=120)
 
 
-def setup_logger(name: str) -> logging.Logger:
-    logger = logging.getLogger(name)
-    FORMAT = "%(asctime)s - %(message)s"
-    logging.basicConfig(format=FORMAT)
-    logger.addHandler(logging.FileHandler("derf.log"))
-    logger.setLevel(logging.DEBUG)
-    return logger
-
-
-logger = setup_logger("bot.utilities")
+logger = setup_logger(__name__)
 
 # Constants for API interaction
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")

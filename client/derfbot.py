@@ -20,7 +20,7 @@ from bot.workers.voice_queue_processor import (
     monitor_nic_response_queue,
 )
 
-logger = setup_logger()
+logger = setup_logger(__name__)
 
 
 @bot.event

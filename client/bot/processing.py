@@ -8,9 +8,11 @@ from bot.utilities import (
     split_message,
     generate_unique_id,
     poll_redis_for_key,
-    logger,
     replace_userids,
 )
+from bot.log_config import setup_logger
+
+logger = setup_logger(__name__)
 
 load_dotenv()
 # Configure Redis

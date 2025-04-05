@@ -3,7 +3,10 @@ import redis
 import json
 import traceback
 
-from bot.utilities import derf_bot, logger, nicole_bot
+from bot.utilities import derf_bot, nicole_bot
+from bot.log_config import setup_logger
+
+logger = setup_logger(__name__)
 
 # Initialize Redis client
 redis_client = redis.Redis(host="0.0.0.0", port=6379, decode_responses=True)

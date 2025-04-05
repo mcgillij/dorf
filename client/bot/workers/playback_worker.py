@@ -3,10 +3,10 @@ import redis
 import os
 import discord
 from bot.commands import bot, nic_bot
-from bot.utilities import logger
-
+from bot.log_config import setup_logger
 from dotenv import load_dotenv
 
+logger = setup_logger(__name__)
 load_dotenv()
 
 VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID", ""))

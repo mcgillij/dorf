@@ -4,8 +4,10 @@ import tempfile
 import asyncio
 from pydub import AudioSegment
 import traceback
-from bot.commands import bot, nic_bot, redis_client
+from bot.commands import bot, nic_bot
+from bot.processing import redis_client
 from bot.utilities import logger, replace_userids
+from bot.log_config import setup_logger
 
 import numpy as np
 from kokoro import KPipeline
@@ -15,6 +17,8 @@ pipeline = KPipeline(lang_code="a")  # english
 TTS_ENGINE = "kokoro"  # or use the mimic3 docker container
 TTS_VOICE = "am_adam"
 TTS_VOICE_NICOLE = "af_nicole"
+
+logger = setup_logger(__name__)
 
 
 def process_kokoro_audio(line_text, voice, output_wav):

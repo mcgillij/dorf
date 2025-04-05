@@ -4,17 +4,19 @@ import json
 import asyncio
 import redis
 from bot.commands import bot, nic_bot
-from bot.utilities import logger
+from bot.log_config import setup_logger
 
 from dotenv import load_dotenv
 
 from bot.utilities import split_message, derf_bot, nicole_bot
-from bot.commands import (
+from bot.processing import (
     poll_redis_for_key,
     LONG_RESPONSE_THRESHOLD,
     process_audio_queue,
     process_nic_audio_queue,
 )
+
+logger = setup_logger(__name__)
 
 load_dotenv()
 # Configure Redis

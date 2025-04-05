@@ -6,11 +6,10 @@ import redis
 import asyncio  # Ensure you have this imported for running async code
 from dotenv import load_dotenv
 import aiohttp
+from log_config import setup_logger
 from db import SQLiteDB
-from bot.utilities import setup_logger
 
-logger = setup_logger("whisper_worker")
-
+logger = setup_logger(__name__)
 
 load_dotenv()
 # Configure Redis

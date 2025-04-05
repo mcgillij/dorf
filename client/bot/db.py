@@ -1,8 +1,8 @@
 import sqlite3
 from datetime import datetime
-from bot.utilities import setup_logger
+from log_config import setup_logger
 
-logger = setup_logger("derf")
+logger = setup_logger(__name__)
 
 
 class SQLiteDB:

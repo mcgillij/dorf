@@ -1,7 +1,7 @@
 import json
 import aiohttp
 from typing import List, Dict
-from bot.utilities import setup_logger
+from bot.log_config import setup_logger
 
 logger = setup_logger(__name__)
 SEARCH_URL = "https://searx.mcgillij.dev"
@@ -17,7 +17,9 @@ async def search_internet(q: str) -> List[Dict]:
         async with session.get(url, params=params, ssl=True) as response:
             if response.status == 200:
                 # Read the response content
+                logger.info("awaiting the search results")
                 data = await response.text()
+                logger.info("converting response to text")
                 # Parse the JSON data
                 data = json.loads(data)
                 # Print the content of the results

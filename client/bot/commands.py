@@ -1,7 +1,8 @@
+import os
 from random import choice
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, voice_recv
 from dotenv import load_dotenv
 
 from bot.processing import (
@@ -11,19 +12,19 @@ from bot.processing import (
     process_nic_response,
 )
 
-from bot.utilities import (
-    filtered_responses,
-    filter_message,
-    logger,
-)
+from bot.utilities import filtered_responses, filter_message, split_message
+
+from bot.log_config import setup_logger
 
 from bot.lms import (
     search_with_tool,
 )
 
-from bot.audio_capture import RingBufferAudioSink, connect_to_voice, start_capture
+from bot.audio_capture import RingBufferAudioSink
 
 load_dotenv()
+
+logger = setup_logger(__name__)
 
 # Configure bot and intents
 INTENTS = discord.Intents.default()
@@ -38,7 +39,9 @@ nic_bot = commands.Bot(command_prefix="#", intents=INTENTS)
 @bot.command()
 async def search(ctx, *, message: str):
     results = await search_with_tool(message)
-    await ctx.send(results)
+    messages = split_message(results)
+    for m in messages:
+        await ctx.send(m)
 
 
 @bot.command()
@@ -112,3 +115,59 @@ async def on_voice_state_update(member, before, after):
                 sink = vc.sink
                 if isinstance(sink, RingBufferAudioSink):
                     await b.loop.run_in_executor(None, sink.save_user_audio, member.id)
+
+
+async def start_capture(guild, channel):
+    for b in [bot, nic_bot]:
+        try:
+            vc = guild.voice_client
+            if not vc or vc.channel != channel:
+                vc = await channel.connect(cls=VoiceRecvClient)
+
+            if vc.is_listening():
+                logger.info("Already capturing audio.")
+                return
+
+            ring_buffer_sink = RingBufferAudioSink(bot=b, buffer_size=1024 * 1024)
+            vc.listen(ring_buffer_sink)
+            logger.info(f"Recording started in channel {channel}")
+        except Exception as e:
+            logger.error(f"Error in start_capture: {e}")
+
+
+async def connect_to_voice(b):
+    guild_id = int(os.getenv("GUILD_ID", ""))
+    voice_channel_id = int(os.getenv("VOICE_CHANNEL_ID", ""))
+    guild = discord.utils.get(b.guilds, id=guild_id)
+
+    if not guild:
+        logger.error("Guild not found.")
+        return
+
+    voice_channel = guild.get_channel(voice_channel_id)
+    if not isinstance(voice_channel, discord.VoiceChannel):
+        logger.error(f"Invalid or non-existent voice channel: {voice_channel_id}")
+        return
+
+    # Check existing connections in the guild
+    current_vc = next((vc for vc in b.voice_clients if vc.guild == guild), None)
+
+    try:
+        if not current_vc:
+            await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
+            logger.info(f"Connected to {voice_channel.name}")
+        else:
+            # Check if already connected to the correct channel
+            if current_vc.channel.id != voice_channel.id:
+                # Move existing client or reconnect?
+                try:
+                    await current_vc.move_to(voice_channel)  # Attempt move first
+                    logger.info(f"Moved to {voice_channel.name}")
+                except discord.errors.InvalidData as e:
+                    logger.error(f"Move failed: {e}. Reconnecting...")
+                    await current_vc.disconnect()
+                    await voice_channel.connect(cls=voice_recv.VoiceRecvClient)
+            else:
+                logger.debug("Already connected to the correct channel.")
+    except Exception as e:
+        logger.exception(f"Connection error: {str(e)}")
