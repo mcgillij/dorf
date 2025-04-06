@@ -2,6 +2,7 @@ import os
 from random import choice
 import asyncio
 from asyncio import run_coroutine_threadsafe
+import dice
 
 import discord
 from discord.ext import commands, voice_recv
@@ -56,6 +57,26 @@ async def message_dispatcher():
 def enqueue_message(channel, content):
     message_queue.put_nowait((channel, content))
 
+@bot.event
+async def on_message(message):
+    # ignore self messages
+    if message.author == bot.user:
+        return
+    if message.content.startswith('/r'):
+        roll = message.content.replace('/r', '')
+        roll = roll.replace('oll ', '')
+        try:
+            result = dice.roll(roll)
+            result_message = ''
+            if len(result) == 1:
+                result_message = f'**{result[0]}**'
+            else:
+                result_message = f'{str(result)}: **{sum(result)}**'
+            asyncio.run_coroutine_threadsafe(message.channel.send(f':game_die: {roll}: {result_message}'), bot.loop)
+        except dice.DiceBaseException as e:
+            logger.info(e)
+        except dice.DiceFatalError as e:
+            logger.info(e)
 
 # Command to handle messages
 @bot.command()
