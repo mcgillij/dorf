@@ -3,6 +3,7 @@ import re
 import threading
 import dotenv
 from random import randint
+import discord
 import aiohttp
 import asyncio
 import traceback
@@ -115,9 +116,48 @@ async def replace_userids(text: str) -> str:
     logger.debug(f"{result=}")
     return result
 
+async def replace_userids_with_username(text: str) -> str:
+    logger.debug(f"{text=}")
+
+    async def replace_match(match):
+        user_id = int(match.group(1))
+        username = await get_display_name(user_id)
+        return username
+
+    # Find all matches and replace them asynchronously
+    async def process_matches(text, pattern):
+        matches = re.finditer(pattern, text)
+        replacements = []
+        last_end = 0
+        for match in matches:
+            replacements.append((match.start(), await replace_match(match)))
+            last_end = match.end()
+        if last_end < len(text):
+            replacements.append((last_end, text[last_end:]))
+        return replacements
+
+    # Process all patterns
+    patterns = [r"<@(\d+)>", r"@(\d+)", r"(\d+):", r"(\d+),"]
+    result = text
+    for pattern in patterns:
+        replacements = await process_matches(result, pattern)
+        result = "".join(replacement[1] for replacement in sorted(replacements))
+
+    logger.debug(f"{result=}")
+    return result
 
 async def sanitize_userid(user_id: int):
     return f"<@{user_id}>"
+
+async def get_display_name(bot, guild: discord.Guild, user_id: int) -> str:
+    member = guild.get_member(user_id)
+    if member:
+        return member.display_name
+    try:
+        member = await guild.fetch_member(user_id)
+        return member.display_name
+    except discord.NotFound:
+        return f"Unknown User ({user_id})"
 
 
 def filter_message(message: str) -> bool:

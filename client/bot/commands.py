@@ -81,9 +81,61 @@ class BaseBot(commands.Bot):
         await handle_voice_state_update(self, member, before, after)
 
 
+
+
 @commands.command()
+async def derf(ctx, *, message: str):
+    logger.info("in derf")
+    if filter_message(message):
+        await ctx.send(choice(filtered_responses))
+        return
+    uid = await queue_message_processing(ctx, message)
+    await process_response(ctx, uid)
+
+@commands.command(name='roll', aliases=['r']) # Command name is !roll, alias !r
+async def roll_dice(ctx, *, dice_notation: str):
+    """Rolls dice using standard dice notation (e.g., !roll d20, !r 2d8+4)."""
+
+    clean_notation = dice_notation.strip() # Remove leading/trailing whitespace
+
+    if not clean_notation:
+        await ctx.send(f"Usage: `{self.command_prefix}roll <dice_notation>` (e.g., `{self.command_prefix}roll 2d6+3`)")
+        return
+
+    logger.info(f"Dice roll requested by {ctx.author}: {clean_notation}")
+
+    try:
+        # The dice library handles parsing the notation string
+        result = dice.roll(clean_notation)
+
+        # Format the result message (similar to your on_message logic)
+        result_message = ""
+        if isinstance(result, (int, float)):
+            result_message = f"**{result}**"
+        elif isinstance(result, list) and len(result) == 1:
+             result_message = f"**{result[0]}**"
+        elif isinstance(result, list):
+            result_message = f"{str(result)}: **{sum(result)}**"
+        else: # Fallback for any other types dice might return
+            result_message = f"{str(result)}"
+
+        # Send the result back using the command context
+        await ctx.send(f":game_die: {ctx.author.mention} rolled `{clean_notation}`: {result_message}")
+
+    except (dice.DiceBaseException, dice.DiceFatalError) as e:
+        logger.warning(f"Invalid dice notation from {ctx.author}: '{clean_notation}'. Error: {e}")
+        await ctx.send(f"Sorry {ctx.author.mention}, I couldn't understand `{clean_notation}`. Please use standard dice notation (like `d20`, `2d6+3`). Error: {e}")
+    except Exception as e:
+        # Catch any other unexpected errors during rolling
+        logger.error(f"Unexpected error rolling dice '{clean_notation}' for {ctx.author}: {e}", exc_info=True)
+        await ctx.send("An unexpected error occurred while trying to roll the dice.")
+
+
+@commands.command(name="search", alias='s')
 async def search(ctx, *, message: str):
+    logger.info("in search")
     def callback(param=None):
+        logger.info("in callback")
         if param:
             enqueue_message(ctx.channel, param)
 
@@ -92,43 +144,13 @@ async def search(ctx, *, message: str):
         enqueue_message(ctx.channel, msg)
 
 
-@commands.command()
-async def derf(ctx, *, message: str):
-    if filter_message(message):
-        await ctx.send(choice(filtered_responses))
-        return
-    uid = await queue_message_processing(ctx, message)
-    await process_response(ctx, uid)
-
-
 class DerfBot(BaseBot):
     def __init__(self, *args, **kwargs):
-        super().__init__(name="derf_bot", prefix="!", *args, **kwargs)
-        self.add_listener(self.on_message)
+        super().__init__(name="derfbot", prefix="!", *args, **kwargs)
         self.add_command(search)
+        self.add_command(roll_dice)
+        logger.info("attaching derf command")
         self.add_command(derf)
-
-    async def on_message(self, message):
-        # ignore self messages
-        if message.author == bot.user:
-            return
-        if message.content.startswith("/r"):
-            roll = message.content.replace("/r", "").replace("oll", "")
-            try:
-                result = dice.roll(roll)
-                result_message = ""
-                if len(result) == 1:
-                    result_message = f"**{result[0]}**"
-                else:
-                    result_message = f"{str(result)}: **{sum(result)}**"
-                asyncio.run_coroutine_threadsafe(
-                    message.channel.send(f":game_die: {roll}: {result_message}"),
-                    bot.loop,
-                )
-            except dice.DiceBaseException as e:
-                logger.info(e)
-            except dice.DiceFatalError as e:
-                logger.info(e)
 
 
 @commands.command()
