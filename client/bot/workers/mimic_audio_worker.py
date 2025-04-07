@@ -94,7 +94,7 @@ async def mimic_nic_audio_task():
             continue
 
         unique_id, line_number, line_text = task_data.split("|", 2)
-        line_text = await replace_userids(line_text, nic_bot)  # Assuming this is async
+        line_text = await replace_userids(line_text)  # Assuming this is async
 
         num_users = (
             len(nic_bot.voice_clients[0].channel.members) - 1
@@ -163,7 +163,7 @@ async def mimic_audio_task():
             continue
 
         unique_id, line_number, line_text = task_data.split("|", 2)
-        line_text = await replace_userids(line_text, bot)  # Assuming this is async
+        line_text = await replace_userids(line_text)  # Assuming this is async
 
         num_users = (
             len(bot.voice_clients[0].channel.members) - 1 if bot.voice_clients else 0

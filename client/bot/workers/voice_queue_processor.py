@@ -79,11 +79,11 @@ async def monitor_nic_response_queue():
                 await channel.send(response_chunk)
 
             # Check for voice channel users
-            human_in_voice_channel = bool(
-                ctx.guild.voice_client
-                and any(
-                    not member.bot for member in ctx.guild.voice_client.channel.members
-                )
+            voice_client = channel.guild.voice_client
+            human_in_voice_channel = (
+                voice_client is not None
+                and voice_client.channel is not None
+                and any(not m.bot for m in voice_client.channel.members)
             )
             logger.info(f"Nic: human in voice channel: {human_in_voice_channel}")
 
@@ -158,11 +158,11 @@ async def monitor_response_queue():
                 await channel.send(response_chunk)
 
             # Check for voice channel users
-            human_in_voice_channel = bool(
-                ctx.guild.voice_client
-                and any(
-                    not member.bot for member in ctx.guild.voice_client.channel.members
-                )
+            voice_client = channel.guild.voice_client
+            human_in_voice_channel = (
+                voice_client is not None
+                and voice_client.channel is not None
+                and any(not m.bot for m in voice_client.channel.members)
             )
             logger.info(f"Human in voice channel: {human_in_voice_channel}")
 

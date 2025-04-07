@@ -23,29 +23,46 @@ from bot.workers.voice_queue_processor import (
 logger = setup_logger(__name__)
 
 
+async def setup_bot(bot_instance, voice_connector, tasks: list, name: str):
+    await bot_instance.wait_until_ready()
+    logger.info(f"{name} is ready: Logged in as {bot_instance.user.name}")
+    await voice_connector(bot_instance)
+    for task in tasks:
+        asyncio.create_task(task())
+    logger.info(f"{name} startup complete")
+
+
 @bot.event
+async def on_ready():
+    await setup_bot(
+        bot,
+        connect_to_voice,
+        [
+            mimic_audio_task,
+            playback_task,
+            process_response_queue,
+            process_summarizer_queue,
+            monitor_response_queue,
+            message_dispatcher,
+        ],
+        name="DerfBot",
+    )
+
+
 @nic_bot.event
 async def on_ready():
-    logger.info(f"Logged in as {bot.user.name}")
-    await bot.wait_until_ready()
-    await connect_to_voice(bot)
-    asyncio.create_task(mimic_audio_task())
-    asyncio.create_task(playback_task())
-    asyncio.create_task(process_response_queue())
-    asyncio.create_task(process_summarizer_queue())
-    asyncio.create_task(monitor_response_queue())
-    asyncio.create_task(message_dispatcher())
-    logger.info("done kicking off the bot")
-
-    logger.info(f"Logged in as {nic_bot.user.name}")
-    await nic_bot.wait_until_ready()
-    await connect_to_voice(nic_bot)
-    asyncio.create_task(mimic_nic_audio_task())
-    asyncio.create_task(playback_nic_task())
-    asyncio.create_task(process_nic_response_queue())
-    asyncio.create_task(process_nic_summarizer_queue())
-    asyncio.create_task(monitor_nic_response_queue())
-    logger.info("done kicking off the nic_bot")
+    await setup_bot(
+        nic_bot,
+        connect_to_voice,
+        [
+            mimic_nic_audio_task,
+            playback_nic_task,
+            process_nic_response_queue,
+            process_nic_summarizer_queue,
+            monitor_nic_response_queue,
+        ],
+        name="NicBot",
+    )
 
 
 async def main():
