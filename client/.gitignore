@@ -3,3 +3,5 @@ user_audio
 .env
 nohup*
 *.db
+spack
+frieren

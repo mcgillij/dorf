@@ -116,6 +116,7 @@ async def replace_userids(text: str) -> str:
     logger.debug(f"{result=}")
     return result
 
+
 async def replace_userids_with_username(text: str) -> str:
     logger.debug(f"{text=}")
 
@@ -146,8 +147,10 @@ async def replace_userids_with_username(text: str) -> str:
     logger.debug(f"{result=}")
     return result
 
+
 async def sanitize_userid(user_id: int):
     return f"<@{user_id}>"
+
 
 async def get_display_name(bot, guild: discord.Guild, user_id: int) -> str:
     member = guild.get_member(user_id)

@@ -37,6 +37,9 @@ INTENTS.message_content = True
 INTENTS.voice_states = True
 INTENTS.members = True
 
+SPACK_DIR = "spack/"
+FRIEREN_DIR = "frieren/"
+
 # message queue to not get rate limited hopefully by discord
 message_queue = asyncio.Queue()
 
@@ -66,6 +69,38 @@ async def check_bots(ctx):
     await ctx.send(f"Bots found: {', '.join(bots) if bots else 'No bots detected.'}")
 
 
+@commands.command()
+async def spack(ctx):
+    """Sends a random image from the images directory."""
+    image_path = get_random_image_path(SPACK_DIR)
+    logger.info(f"Image path: {image_path}")
+    if image_path:
+        try:
+            with open(image_path, "rb") as f:
+                picture = discord.File(f)
+                await ctx.send(file=picture)
+        except FileNotFoundError:
+            await ctx.send("Image file not found (even though path was generated).")
+    else:
+        await ctx.send(f"No images found in the '{SPACK_DIR}' directory.")
+
+
+@commands.command()
+async def frieren(ctx):
+    """Sends a random image from the images directory."""
+    image_path = get_random_image_path(FRIEREN_DIR)
+    logger.info(f"Image path: {image_path}")
+    if image_path:
+        try:
+            with open(image_path, "rb") as f:
+                picture = discord.File(f)
+                await ctx.send(file=picture)
+        except FileNotFoundError:
+            await ctx.send("Image file not found (even though path was generated).")
+    else:
+        await ctx.send(f"No images found in the '{FRIEREN_DIR}' directory.")
+
+
 class BaseBot(commands.Bot):
     def __init__(self, name, prefix, *args, **kwargs):
         super().__init__(command_prefix=prefix, intents=INTENTS, *args, **kwargs)
@@ -81,8 +116,6 @@ class BaseBot(commands.Bot):
         await handle_voice_state_update(self, member, before, after)
 
 
-
-
 @commands.command()
 async def derf(ctx, *, message: str):
     logger.info("in derf")
@@ -92,14 +125,17 @@ async def derf(ctx, *, message: str):
     uid = await queue_message_processing(ctx, message)
     await process_response(ctx, uid)
 
-@commands.command(name='roll', aliases=['r']) # Command name is !roll, alias !r
+
+@commands.command(name="roll", aliases=["r"])  # Command name is !roll, alias !r
 async def roll_dice(ctx, *, dice_notation: str):
     """Rolls dice using standard dice notation (e.g., !roll d20, !r 2d8+4)."""
 
-    clean_notation = dice_notation.strip() # Remove leading/trailing whitespace
+    clean_notation = dice_notation.strip()  # Remove leading/trailing whitespace
 
     if not clean_notation:
-        await ctx.send(f"Usage: `{self.command_prefix}roll <dice_notation>` (e.g., `{self.command_prefix}roll 2d6+3`)")
+        await ctx.send(
+            f"Usage: `{self.command_prefix}roll <dice_notation>` (e.g., `{self.command_prefix}roll 2d6+3`)"
+        )
         return
 
     logger.info(f"Dice roll requested by {ctx.author}: {clean_notation}")
@@ -113,27 +149,37 @@ async def roll_dice(ctx, *, dice_notation: str):
         if isinstance(result, (int, float)):
             result_message = f"**{result}**"
         elif isinstance(result, list) and len(result) == 1:
-             result_message = f"**{result[0]}**"
+            result_message = f"**{result[0]}**"
         elif isinstance(result, list):
             result_message = f"{str(result)}: **{sum(result)}**"
-        else: # Fallback for any other types dice might return
+        else:  # Fallback for any other types dice might return
             result_message = f"{str(result)}"
 
         # Send the result back using the command context
-        await ctx.send(f":game_die: {ctx.author.mention} rolled `{clean_notation}`: {result_message}")
+        await ctx.send(
+            f":game_die: {ctx.author.mention} rolled `{clean_notation}`: {result_message}"
+        )
 
     except (dice.DiceBaseException, dice.DiceFatalError) as e:
-        logger.warning(f"Invalid dice notation from {ctx.author}: '{clean_notation}'. Error: {e}")
-        await ctx.send(f"Sorry {ctx.author.mention}, I couldn't understand `{clean_notation}`. Please use standard dice notation (like `d20`, `2d6+3`). Error: {e}")
+        logger.warning(
+            f"Invalid dice notation from {ctx.author}: '{clean_notation}'. Error: {e}"
+        )
+        await ctx.send(
+            f"Sorry {ctx.author.mention}, I couldn't understand `{clean_notation}`. Please use standard dice notation (like `d20`, `2d6+3`). Error: {e}"
+        )
     except Exception as e:
         # Catch any other unexpected errors during rolling
-        logger.error(f"Unexpected error rolling dice '{clean_notation}' for {ctx.author}: {e}", exc_info=True)
+        logger.error(
+            f"Unexpected error rolling dice '{clean_notation}' for {ctx.author}: {e}",
+            exc_info=True,
+        )
         await ctx.send("An unexpected error occurred while trying to roll the dice.")
 
 
-@commands.command(name="search", alias='s')
+@commands.command(name="search", alias="s")
 async def search(ctx, *, message: str):
     logger.info("in search")
+
     def callback(param=None):
         logger.info("in callback")
         if param:
@@ -151,6 +197,8 @@ class DerfBot(BaseBot):
         self.add_command(roll_dice)
         logger.info("attaching derf command")
         self.add_command(derf)
+        self.add_command(spack)
+        self.add_command(frieren)
 
 
 @commands.command()
@@ -235,6 +283,37 @@ async def connect_to_voice(b):
                 logger.debug("Already connected to the correct channel.")
     except Exception as e:
         logger.exception(f"Connection error: {str(e)}")
+
+
+def get_random_image_path(directory):
+    """
+    Returns a random image file path from the specified directory.
+
+    Args:
+        directory (str): The path to the directory containing images.
+
+    Returns:
+        str: The full path to a randomly selected image file, or None if no images are found.
+    """
+    try:
+        image_files = [
+            f
+            for f in os.listdir(directory)
+            if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif"))
+        ]  # Filter for common image extensions
+
+        if not image_files:
+            print(f"No images found in directory: {directory}")  # helpful debug message
+            return None
+
+        random_image = choice(image_files)
+        return os.path.join(directory, random_image)  # Construct the full path
+    except FileNotFoundError:
+        print(f"Directory not found: {directory}")
+        return None
+    except Exception as e:
+        print(f"An error occurred: {e}")  # Catch other potential errors
+        return None
 
 
 # instantiate my bots here temporarily, need to refactor this
