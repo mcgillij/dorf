@@ -106,14 +106,11 @@ class BaseBot(commands.Bot):
         super().__init__(command_prefix=prefix, intents=INTENTS, *args, **kwargs)
         self.name = name
         self.add_listener(self.on_ready)
-        self.add_listener(self.on_voice_state_update)
         self.add_command(check_bots)
 
     async def on_ready(self):
         logger.info(f"{self.name} is ready.")
 
-    async def on_voice_state_update(self, member, before, after):
-        await handle_voice_state_update(self, member, before, after)
 
 
 @commands.command()
@@ -199,6 +196,10 @@ class DerfBot(BaseBot):
         self.add_command(derf)
         self.add_command(spack)
         self.add_command(frieren)
+        self.add_listener(self.on_voice_state_update)
+
+    async def on_voice_state_update(self, member, before, after):
+        await handle_voice_state_update(self, member, before, after)
 
 
 @commands.command()
