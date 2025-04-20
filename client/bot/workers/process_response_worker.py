@@ -31,9 +31,9 @@ async def process_response_queue():
 
             # Call get_response
             response = await derf_bot.get_response(message)
+            response = await replace_userids_with_username(response)
 
             # Store the response in Redis for retrieval
-            response = await replace_userids_with_username(response)
             redis_client.set(f"response:{unique_id}", response)
         except Exception as e:
             logger.error(f"Error processing response queue: {e}")
@@ -58,8 +58,8 @@ async def process_nic_response_queue():
             message = task["message"]
 
             # Call get_response
-            response = await replace_userids_with_username(response)
             response = await nicole_bot.get_response(message)
+            response = await replace_userids_with_username(response)
 
             # Store the response in Redis for retrieval
             redis_client.set(f"response_nic:{unique_id}", response)

@@ -1,9 +1,7 @@
 import os
 import re
-import threading
 import dotenv
 from random import randint
-import discord
 import aiohttp
 import asyncio
 import traceback
@@ -19,7 +17,7 @@ logger = setup_logger(__name__)
 
 # Constants for API interaction
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
-#WORKSPACE = "birthright"
+# WORKSPACE = "birthright"
 WORKSPACE = "a-new-workspace"
 NIC_WORKSPACE = "nic"
 SESSION_ID = "my-session-id"
@@ -92,32 +90,32 @@ async def replace_userids_with_username(text: str) -> str:
     logger.info("Replacing user IDs with usernames")
     logger.debug(f"{text=}")
 
-    async def replace_match(match):
+    async def replace_match(match: re.Match) -> str:
         user_id = int(match.group(1))
         username = await sanitize_userid(user_id)
         return username
 
-    # Find all matches and replace them asynchronously
-    async def process_matches(text, pattern):
-        matches = re.finditer(pattern, text)
-        replacements = []
+    async def replace_pattern(pattern: str, text: str) -> str:
+        matches = list(re.finditer(pattern, text))
+        if not matches:
+            return text
+
+        # Build the new text progressively
+        new_text = []
         last_end = 0
         for match in matches:
-            replacements.append((match.start(), await replace_match(match)))
+            new_text.append(text[last_end : match.start()])
+            new_text.append(await replace_match(match))
             last_end = match.end()
-        if last_end < len(text):
-            replacements.append((last_end, text[last_end:]))
-        return replacements
+        new_text.append(text[last_end:])
+        return "".join(new_text)
 
-    # Process all patterns
     patterns = [r"<@(\d+)>", r"@(\d+)", r"(\d+):", r"(\d+),"]
-    result = text
     for pattern in patterns:
-        replacements = await process_matches(result, pattern)
-        result = "".join(replacement[1] for replacement in sorted(replacements))
+        text = await replace_pattern(pattern, text)
 
-    logger.debug(f"{result=}")
-    return result
+    logger.debug(f"{text=}")
+    return text
 
 
 async def sanitize_userid(user_id: int):
@@ -232,56 +230,3 @@ def split_text(text):  # This shouldn't be needed anymore since moving mostly to
     Splits the text into chunks using newlines (\n) or periods (.) as delimiters.
     """
     return [chunk.strip() for chunk in re.split(r"[.\n]", text) if chunk.strip()]
-
-
-class RingBuffer:
-    def __init__(self, size: int):
-        self.buffer = bytearray(size)
-        self.size = size
-        self.write_ptr = 0
-        self.read_ptr = 0
-        self.is_full = False
-        self.lock = threading.Lock()
-
-    def write(self, data: bytes):
-        with self.lock:
-            data_len = len(data)
-            if data_len > self.size:
-                # If data exceeds buffer size, write only the last chunk
-                data = data[-self.size :]
-                data_len = len(data)
-
-            # Write data in a circular manner
-            for byte in data:
-                self.buffer[self.write_ptr] = byte
-                self.write_ptr = (self.write_ptr + 1) % self.size
-                if self.is_full:
-                    self.read_ptr = (self.read_ptr + 1) % self.size
-                self.is_full = self.write_ptr == self.read_ptr
-
-    def read_all(self) -> bytes:
-        with self.lock:
-            if not self.is_full and self.write_ptr == self.read_ptr:
-                # Buffer is empty
-                return b""
-
-            if self.is_full:
-                # Read from the full buffer
-                data = self.buffer[self.read_ptr :] + self.buffer[: self.write_ptr]
-            else:
-                # Read from the used portion
-                data = self.buffer[self.read_ptr : self.write_ptr]
-
-            self.read_ptr = self.write_ptr  # Mark buffer as read
-            self.is_full = False
-            return bytes(data)
-
-    def is_empty(self) -> bool:
-        with self.lock:
-            return not self.is_full and self.write_ptr == self.read_ptr
-
-    def clear(self):
-        with self.lock:
-            self.write_ptr = 0
-            self.read_ptr = 0
-            self.is_full = False

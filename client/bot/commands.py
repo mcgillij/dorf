@@ -11,10 +11,10 @@ from discord.ext.voice_recv import VoiceRecvClient
 from dotenv import load_dotenv
 
 from bot.processing import (
-    queue_message_processing,
-    queue_nic_message_processing,
-    process_response,
-    process_nic_response,
+    queue_derf,
+    queue_nic,
+    process_derf,
+    process_nic,
 )
 
 from bot.utilities import filtered_responses, filter_message, split_message
@@ -112,15 +112,14 @@ class BaseBot(commands.Bot):
         logger.info(f"{self.name} is ready.")
 
 
-
 @commands.command()
 async def derf(ctx, *, message: str):
     logger.info("in derf")
     if filter_message(message):
         await ctx.send(choice(filtered_responses))
         return
-    uid = await queue_message_processing(ctx, message)
-    await process_response(ctx, uid)
+    uid = await queue_derf(ctx, message)
+    await process_derf(ctx, uid)
 
 
 @commands.command(name="roll", aliases=["r"])  # Command name is !roll, alias !r
@@ -204,8 +203,8 @@ class DerfBot(BaseBot):
 
 @commands.command()
 async def nic(ctx, *, message: str):
-    uid = await queue_nic_message_processing(ctx, message)
-    await process_nic_response(ctx, uid)
+    uid = await queue_nic(ctx, message)
+    await process_nic(ctx, uid)
 
 
 class NicBot(BaseBot):

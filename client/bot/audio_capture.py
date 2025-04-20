@@ -4,14 +4,14 @@ import os
 import json
 import wave
 import time
+import threading
 from pydub import AudioSegment
 import discord
 from discord.ext.voice_recv import AudioSink, VoiceData
 import redis
 from dotenv import load_dotenv
-from .utilities import RingBuffer
 from bot.log_config import setup_logger
-from typing import Dict, Optional
+from typing import Dict
 import asyncio
 
 logger = setup_logger(__name__)
@@ -22,6 +22,59 @@ REDIS_HOST = os.getenv("REDIS_HOST", "")
 REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
 
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+
+
+class RingBuffer:
+    def __init__(self, size: int):
+        self.buffer = bytearray(size)
+        self.size = size
+        self.write_ptr = 0
+        self.read_ptr = 0
+        self.is_full = False
+        self.lock = threading.Lock()
+
+    def write(self, data: bytes):
+        with self.lock:
+            data_len = len(data)
+            if data_len > self.size:
+                # If data exceeds buffer size, write only the last chunk
+                data = data[-self.size :]
+                data_len = len(data)
+
+            # Write data in a circular manner
+            for byte in data:
+                self.buffer[self.write_ptr] = byte
+                self.write_ptr = (self.write_ptr + 1) % self.size
+                if self.is_full:
+                    self.read_ptr = (self.read_ptr + 1) % self.size
+                self.is_full = self.write_ptr == self.read_ptr
+
+    def read_all(self) -> bytes:
+        with self.lock:
+            if not self.is_full and self.write_ptr == self.read_ptr:
+                # Buffer is empty
+                return b""
+
+            if self.is_full:
+                # Read from the full buffer
+                data = self.buffer[self.read_ptr :] + self.buffer[: self.write_ptr]
+            else:
+                # Read from the used portion
+                data = self.buffer[self.read_ptr : self.write_ptr]
+
+            self.read_ptr = self.write_ptr  # Mark buffer as read
+            self.is_full = False
+            return bytes(data)
+
+    def is_empty(self) -> bool:
+        with self.lock:
+            return not self.is_full and self.write_ptr == self.read_ptr
+
+    def clear(self):
+        with self.lock:
+            self.write_ptr = 0
+            self.read_ptr = 0
+            self.is_full = False
 
 
 class RingBufferAudioSink(AudioSink):

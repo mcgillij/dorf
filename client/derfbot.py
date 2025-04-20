@@ -4,7 +4,7 @@ import os
 import asyncio
 
 from bot.commands import bot, nic_bot, connect_to_voice, message_dispatcher
-from bot.utilities import setup_logger
+from bot.utilities import setup_logger, derf_bot, nicole_bot
 from bot.workers.process_response_worker import (
     process_response_queue,
     process_nic_response_queue,
@@ -15,54 +15,91 @@ from bot.workers.process_summarizer_worker import (
 )
 from bot.workers.mimic_audio_worker import mimic_audio_task, mimic_nic_audio_task
 from bot.workers.playback_worker import playback_task, playback_nic_task
-from bot.workers.voice_queue_processor import (
-    monitor_response_queue,
-    monitor_nic_response_queue,
-)
+from bot.workers.voice_queue_processor import start_monitor_task
+from bot.processing import process_derf, process_nic
 
 logger = setup_logger(__name__)
 
 
-async def setup_bot(bot_instance, voice_connector, tasks: list, name: str):
+async def setup_bot(
+    bot_instance,
+    name: str,
+    voice_connector,
+    worker_tasks: list,
+    monitor_config: dict,
+):
     await bot_instance.wait_until_ready()
     logger.info(f"{name} is ready: Logged in as {bot_instance.user.name}")
+
     await voice_connector(bot_instance)
-    for task in tasks:
+
+    for task in worker_tasks:
         asyncio.create_task(task())
+
+    start_monitor_task(
+        bot_instance=bot_instance,
+        bot_logic=monitor_config["bot_logic"],
+        queue_name=monitor_config["queue_name"],
+        response_key_prefix=monitor_config["response_key_prefix"],
+        summarizer_queue=monitor_config["summarizer_queue"],
+        process_audio_function=monitor_config["process_audio_function"],
+        logger_name=name,
+    )
+
     logger.info(f"{name} startup complete")
 
 
-@bot.event
-async def on_ready():
+async def derfbot_ready():
     await setup_bot(
-        bot,
-        connect_to_voice,
-        [
+        bot_instance=bot,
+        name="DerfBot",
+        voice_connector=connect_to_voice,
+        worker_tasks=[
             mimic_audio_task,
             playback_task,
             process_response_queue,
             process_summarizer_queue,
-            monitor_response_queue,
             message_dispatcher,
         ],
-        name="DerfBot",
+        monitor_config={
+            "bot_logic": derf_bot,
+            "queue_name": "voice_response_queue",
+            "response_key_prefix": "response_queue",
+            "summarizer_queue": "summarizer_queue",
+            "process_audio_function": process_derf,
+        },
     )
 
 
-@nic_bot.event
-async def on_ready():
+async def nicbot_ready():
     await setup_bot(
-        nic_bot,
-        connect_to_voice,
-        [
+        bot_instance=nic_bot,
+        name="NicBot",
+        voice_connector=connect_to_voice,
+        worker_tasks=[
             mimic_nic_audio_task,
             playback_nic_task,
             process_nic_response_queue,
             process_nic_summarizer_queue,
-            monitor_nic_response_queue,
         ],
-        name="NicBot",
+        monitor_config={
+            "bot_logic": nicole_bot,
+            "queue_name": "voice_nic_response_queue",
+            "response_key_prefix": "response_nic_queue",
+            "summarizer_queue": "summarizer_nic_queue",
+            "process_audio_function": process_nic,
+        },
     )
+
+
+@bot.event
+async def on_ready():
+    await derfbot_ready()
+
+
+@nic_bot.event
+async def on_ready():
+    await nicbot_ready()
 
 
 async def main():
