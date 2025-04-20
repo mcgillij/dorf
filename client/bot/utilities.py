@@ -15,16 +15,18 @@ dotenv.load_dotenv()
 
 timeout = aiohttp.ClientTimeout(total=120)
 
-
 logger = setup_logger(__name__)
 
 # Constants for API interaction
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
-WORKSPACE = "birthright"
+#WORKSPACE = "birthright"
+WORKSPACE = "a-new-workspace"
 NIC_WORKSPACE = "nic"
 SESSION_ID = "my-session-id"
 NIC_SESSION_ID = "my-session-id"
 LLM_HOST = os.getenv("LLM_HOST", "")
+GUILD_ID = os.getenv("GUILD_ID", "")
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 
 redis_client = redis.Redis(decode_responses=True)
 # filtered words
@@ -86,7 +88,8 @@ filtered_responses = [
 ]
 
 
-async def replace_userids(text: str) -> str:
+async def replace_userids_with_username(text: str) -> str:
+    logger.info("Replacing user IDs with usernames")
     logger.debug(f"{text=}")
 
     async def replace_match(match):
@@ -117,50 +120,8 @@ async def replace_userids(text: str) -> str:
     return result
 
 
-async def replace_userids_with_username(text: str) -> str:
-    logger.debug(f"{text=}")
-
-    async def replace_match(match):
-        user_id = int(match.group(1))
-        username = await get_display_name(user_id)
-        return username
-
-    # Find all matches and replace them asynchronously
-    async def process_matches(text, pattern):
-        matches = re.finditer(pattern, text)
-        replacements = []
-        last_end = 0
-        for match in matches:
-            replacements.append((match.start(), await replace_match(match)))
-            last_end = match.end()
-        if last_end < len(text):
-            replacements.append((last_end, text[last_end:]))
-        return replacements
-
-    # Process all patterns
-    patterns = [r"<@(\d+)>", r"@(\d+)", r"(\d+):", r"(\d+),"]
-    result = text
-    for pattern in patterns:
-        replacements = await process_matches(result, pattern)
-        result = "".join(replacement[1] for replacement in sorted(replacements))
-
-    logger.debug(f"{result=}")
-    return result
-
-
 async def sanitize_userid(user_id: int):
     return f"<@{user_id}>"
-
-
-async def get_display_name(bot, guild: discord.Guild, user_id: int) -> str:
-    member = guild.get_member(user_id)
-    if member:
-        return member.display_name
-    try:
-        member = await guild.fetch_member(user_id)
-        return member.display_name
-    except discord.NotFound:
-        return f"Unknown User ({user_id})"
 
 
 def filter_message(message: str) -> bool:
@@ -192,7 +153,7 @@ def split_message(message: str, max_length: int = 2000) -> list[str]:
         return []
 
 
-class DerfBot:
+class LLMClient:
     def __init__(self, auth_token: str, workspace: str, session_id: str):
         self.auth_token = auth_token
         self.workspace = workspace
@@ -262,8 +223,8 @@ class DerfBot:
                 return "An error occurred while processing the request. Please try again later."
 
 
-derf_bot = DerfBot(AUTH_TOKEN, WORKSPACE, SESSION_ID)
-nicole_bot = DerfBot(AUTH_TOKEN, NIC_WORKSPACE, NIC_SESSION_ID)
+derf_bot = LLMClient(AUTH_TOKEN, WORKSPACE, SESSION_ID)
+nicole_bot = LLMClient(AUTH_TOKEN, NIC_WORKSPACE, NIC_SESSION_ID)
 
 
 def split_text(text):  # This shouldn't be needed anymore since moving mostly to kokoro

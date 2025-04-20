@@ -3,7 +3,7 @@ import redis
 import json
 import traceback
 
-from bot.utilities import derf_bot, nicole_bot
+from bot.utilities import derf_bot, nicole_bot, replace_userids_with_username
 from bot.log_config import setup_logger
 
 logger = setup_logger(__name__)
@@ -33,6 +33,7 @@ async def process_response_queue():
             response = await derf_bot.get_response(message)
 
             # Store the response in Redis for retrieval
+            response = await replace_userids_with_username(response)
             redis_client.set(f"response:{unique_id}", response)
         except Exception as e:
             logger.error(f"Error processing response queue: {e}")
@@ -57,6 +58,7 @@ async def process_nic_response_queue():
             message = task["message"]
 
             # Call get_response
+            response = await replace_userids_with_username(response)
             response = await nicole_bot.get_response(message)
 
             # Store the response in Redis for retrieval

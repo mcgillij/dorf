@@ -8,7 +8,7 @@ from bot.utilities import (
     split_message,
     generate_unique_id,
     poll_redis_for_key,
-    replace_userids,
+    replace_userids_with_username,
 )
 from bot.log_config import setup_logger
 
@@ -33,6 +33,7 @@ async def queue_message_processing(ctx, message: str):
     # Store the context if not already stored
     context_dict.setdefault(unique_id, ctx)
     # Queue the message for processing
+    message = await replace_userids_with_username(message)
     redis_client.lpush(
         "response_queue",
         json.dumps({"unique_id": unique_id, "message": f"{ctx.author.id}:{message}"}),
@@ -45,6 +46,7 @@ async def queue_nic_message_processing(ctx, message: str):
     logger.info(f"Nic: Unique ID: {unique_id}")
     # Store the context if not already stored
     context_dict.setdefault(unique_id, ctx)
+    message = await replace_userids_with_username(message)
     # Queue the message for processing
     redis_client.lpush(
         "response_nic_queue",
@@ -60,8 +62,7 @@ async def process_response(ctx, unique_id: str):
     response = await poll_redis_for_key(key)
     # Send the response in chunks
     for response_chunk in split_message(response, 2000):
-        processed_chunk = await replace_userids(response)
-        await ctx.send(processed_chunk)
+        await ctx.send(response_chunk)
     # Check for voice channel users
     human_in_voice_channel = bool(
         ctx.guild.voice_client
@@ -76,8 +77,7 @@ async def process_response(ctx, unique_id: str):
         )
         summary_key = f"summarizer:{unique_id}"
         summary_response = await poll_redis_for_key(summary_key)
-        processed_summary = await replace_userids(summary_response)
-        await ctx.send(processed_summary)
+        await ctx.send(summary_response)
         if human_in_voice_channel:
             await process_audio_queue(unique_id, [summary_response])
     else:
@@ -89,10 +89,12 @@ async def process_nic_response(ctx, unique_id: str):
     # Poll Redis for the result
     key = f"response_nic:{unique_id}"
     response = await poll_redis_for_key(key)
+    logger.debug(f"Nic: Response: {response}")
+    response = await replace_userids_with_username(response)
+    logger.debug(f"Nic: Response after replacing userids: {response}")
     # Send the response in chunks
     for response_chunk in split_message(response, 2000):
-        processed_chunk = await replace_userids(response)
-        await ctx.send(processed_chunk)
+        await ctx.send(response_chunk)
     # Check for voice channel users
     human_in_voice_channel = bool(
         ctx.guild.voice_client
@@ -107,8 +109,7 @@ async def process_nic_response(ctx, unique_id: str):
         )
         summary_key = f"summarizer_nic:{unique_id}"
         summary_response = await poll_redis_for_key(summary_key)
-        processed_summary = await replace_userids(summary_response)
-        await ctx.send(processed_summary)
+        await ctx.send(summary_response)
         if human_in_voice_channel:
             await process_nic_audio_queue(unique_id, [summary_response])
     else:
