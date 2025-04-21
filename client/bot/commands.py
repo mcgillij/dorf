@@ -191,22 +191,6 @@ async def search(ctx, *, message: str):
         enqueue_message(ctx.channel, msg)
 
 
-class DerfBot(BaseBot):
-    def __init__(self, *args, **kwargs):
-        super().__init__(name="derfbot", prefix="!", *args, **kwargs)
-        self.add_command(search)
-        self.add_command(roll_dice)
-        logger.info("attaching derf command")
-        self.add_command(derf)
-        self.add_command(spack)
-        self.add_command(frieren)
-        self.add_listener(self.on_voice_state_update)
-        self.llm = LLMClient(AUTH_TOKEN, WORKSPACE, SESSION_ID)
-
-    async def on_voice_state_update(self, member, before, after):
-        await handle_voice_state_update(self, member, before, after)
-
-
 @commands.command()
 async def nic(ctx, *, message: str):
     uid = await queue_nic_message_processing(ctx, message)
@@ -220,20 +204,38 @@ class NicBot(BaseBot):
         self.llm = LLMClient(AUTH_TOKEN, NIC_WORKSPACE, NIC_SESSION_ID)
 
 
-# shared by the bots
-async def handle_voice_state_update(bot, member, before, after):
-    logger.info(
-        f"{bot.name}: Voice update for {member} | {before.channel} -> {after.channel}"
-    )
+class DerfBot(BaseBot):
+    def __init__(self, *args, **kwargs):
+        super().__init__(name="derfbot", prefix="!", *args, **kwargs)
+        self.add_command(search)
+        self.add_command(roll_dice)
+        logger.info("attaching derf command")
+        self.add_command(derf)
+        self.add_command(spack)
+        self.add_command(frieren)
+        self.add_listener(self.on_voice_state_update)
+        self.llm = LLMClient(AUTH_TOKEN, WORKSPACE, SESSION_ID)
 
-    if member == bot.user:
-        if not after.channel and before.channel:
-            logger.warning(f"{bot.name} disconnected. Reconnecting...")
-            await connect_to_voice(bot)
+    # shared by the bots
+    async def handle_voice_state_update(self, member, before, after):
+        logger.info(
+            f"{self.name}: Voice update for {member} | {before.channel} -> {after.channel}"
+        )
+
+        if member == self.user or member.bot:
+            if not after.channel and before.channel:
+                logger.warning(f"{self.name} disconnected. Reconnecting...")
+                await connect_to_voice(self)
+            elif after.channel and not before.channel:
+                await start_capture(member.guild, after.channel, self)
         elif after.channel and not before.channel:
-            await start_capture(member.guild, after.channel, bot)
-    elif after.channel and not before.channel:
-        await start_capture(member.guild, after.channel, bot)
+            await start_capture(member.guild, after.channel, self)
+
+    async def on_voice_state_update(self, member, before, after):
+        if member.bot:
+            # Ignore bot events
+            return
+        await self.handle_voice_state_update(member=member, before=before, after=after)
 
 
 async def start_capture(guild, channel, b):

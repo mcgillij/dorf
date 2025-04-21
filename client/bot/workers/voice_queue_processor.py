@@ -13,7 +13,7 @@ from bot.commands import bot, nic_bot
 from bot.processing import (
     poll_redis_for_key,
     LONG_RESPONSE_THRESHOLD,
-    process_audio_queue,
+    process_derf_audio_queue,
     process_nic_audio_queue,
 )
 
@@ -126,6 +126,6 @@ async def monitor_derf_response_queue():
     await process_response_queue(
         "voice_response_queue",
         bot,
-        process_audio_queue,
+        process_derf_audio_queue,
         "summarizer_queue",
     )

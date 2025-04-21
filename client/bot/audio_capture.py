@@ -118,11 +118,11 @@ class RingBufferAudioSink(AudioSink):
         except Exception as e:
             logger.error(f"Error in write method: {e}")
 
-    def on_voice_state_update(self, member, state):
-        """Called when a member's voice state changes"""
-        if member and hasattr(state, "ssrc"):
-            self.ssrc_to_user[state.ssrc] = member.id
-            logger.info(f"Mapped SSRC {state.ssrc} to user {member.id}")
+    # def on_voice_state_update(self, member, state):
+    #     """Called when a member's voice state changes"""
+    #     if member and hasattr(state, "ssrc"):
+    #         self.ssrc_to_user[state.ssrc] = member.id
+    #         logger.info(f"Mapped SSRC {state.ssrc} to user {member.id}")
 
     async def check_for_silence(self):
         """Background task to check for silence periods and save audio"""
@@ -224,8 +224,8 @@ class VoiceRecvClient(discord.VoiceProtocol):
         if self.audio_sink:
             await self.send_audio_packet(b"", True)
 
-    async def send_audio_packet(self, data, is_last=False):
+    async def send_audio_packet(self, data):
         logger.info(f"Sending audio packet to sink: {self.audio_sink}")
         if not self.audio_sink:
             return
-        await self.audio_sink.read(data)
+        self.audio_sink.write(data)
