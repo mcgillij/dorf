@@ -8,6 +8,7 @@ from discord.ext import commands
 from discord.ext.voice_recv import VoiceRecvClient
 
 from dotenv import load_dotenv
+from bot.poll import PollView
 
 from bot.processing import (
     queue_derf_message_processing,
@@ -66,10 +67,6 @@ async def message_dispatcher():
         await asyncio.sleep(1)  # Adjust this to control rate
 
 
-# async def enqueue_message(channel, content):
-# await message_queue.put((channel, content))
-
-
 def enqueue_message(channel, content):
     message_queue.put_nowait((channel, content))
 
@@ -114,6 +111,12 @@ async def frieren(ctx):
         await ctx.send(f"No images found in the '{FRIEREN_DIR}' directory.")
 
 
+@commands.command()
+async def marne(ctx):
+    """send the url to spackmarne.com"""
+    await ctx.send("<https://spackmarne.com>")
+
+
 class BaseBot(commands.Bot):
     def __init__(self, name, prefix, *args, **kwargs):
         super().__init__(command_prefix=prefix, intents=INTENTS, *args, **kwargs)
@@ -133,6 +136,16 @@ async def derf(ctx, *, message: str):
         return
     uid = await queue_derf_message_processing(ctx, message)
     await process_derf_response(ctx, uid)
+
+
+@commands.command(name="poll", aliases=["p"])  # Command name is !poll, alias !p
+async def poll(ctx, *, question: str):
+    """Create a simple Yes/No poll."""
+    embed = discord.Embed(
+        title="📊 New Poll!", description=question, color=discord.Color.blue()
+    )
+    view = PollView()
+    await ctx.send(embed=embed, view=view)
 
 
 @commands.command(name="roll", aliases=["r"])  # Command name is !roll, alias !r
@@ -219,6 +232,8 @@ class DerfBot(BaseBot):
         self.add_command(derf)
         self.add_command(spack)
         self.add_command(frieren)
+        self.add_command(poll)
+        self.add_command(marne)
         self.add_listener(self.on_voice_state_update)
         self.llm = LLMClient(AUTH_TOKEN, WORKSPACE, SESSION_ID)
 
