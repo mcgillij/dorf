@@ -1,7 +1,6 @@
 import os
 from random import choice
 import asyncio
-from asyncio import run_coroutine_threadsafe
 import dice
 
 import discord
@@ -30,8 +29,12 @@ from bot.audio_capture import RingBufferAudioSink
 load_dotenv()
 
 AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
-# WORKSPACE = "birthright"
-WORKSPACE = "a-new-workspace"
+if not AUTH_TOKEN:
+    raise ValueError(
+        "AUTH_TOKEN is missing. Please set it in the environment variables."
+    )
+WORKSPACE = "birthright"
+# WORKSPACE = "a-new-workspace"
 NIC_WORKSPACE = "nic"
 SESSION_ID = "my-session-id"
 NIC_SESSION_ID = "my-session-id"
@@ -63,7 +66,10 @@ async def message_dispatcher():
         await asyncio.sleep(1)  # Adjust this to control rate
 
 
-# Enqueue a message
+async def enqueue_message(channel, content):
+    await message_queue.put((channel, content))
+
+
 def enqueue_message(channel, content):
     message_queue.put_nowait((channel, content))
 
@@ -177,7 +183,7 @@ async def roll_dice(ctx, *, dice_notation: str):
         await ctx.send("An unexpected error occurred while trying to roll the dice.")
 
 
-@commands.command(name="search", alias="s")
+@commands.command(name="search", aliases=["s"])
 async def search(ctx, *, message: str):
     logger.info("in search")
 
@@ -242,7 +248,7 @@ async def start_capture(guild, channel, b):
     logger.info(f"in: {b=}")
     try:
         vc = guild.voice_client
-        if not vc or vc.channel != channel:
+        if vc is None or vc.channel != channel:
             vc = await channel.connect(cls=VoiceRecvClient)
 
         if vc.is_listening():
@@ -257,8 +263,18 @@ async def start_capture(guild, channel, b):
 
 
 async def connect_to_voice(b):
-    guild_id = int(os.getenv("GUILD_ID", ""))
-    voice_channel_id = int(os.getenv("VOICE_CHANNEL_ID", ""))
+    try:
+        guild_id = int(os.getenv("GUILD_ID", ""))
+        voice_channel_id = int(os.getenv("VOICE_CHANNEL_ID", ""))
+    except ValueError:
+        logger.error("GUILD_ID or VOICE_CHANNEL_ID is not a valid integer.")
+        return
+
+    if not guild_id or not voice_channel_id:
+        logger.error(
+            "GUILD_ID or VOICE_CHANNEL_ID is missing in the environment variables."
+        )
+        return
     guild = discord.utils.get(b.guilds, id=guild_id)
 
     if not guild:
@@ -306,9 +322,10 @@ def get_random_image_path(directory):
     """
     try:
         image_files = [
-            f
-            for f in os.listdir(directory)
-            if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif"))
+            entry.name
+            for entry in os.scandir(directory)
+            if entry.is_file()
+            and entry.name.lower().endswith((".png", ".jpg", ".jpeg", ".gif"))
         ]  # Filter for common image extensions
 
         if not image_files:
