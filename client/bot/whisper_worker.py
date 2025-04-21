@@ -26,6 +26,11 @@ db = SQLiteDB()
 db.create_table()  # Create table if it doesn't exist
 
 
+# Redis queue names as constants
+WHISPER_QUEUE = "whisper_queue"
+VOICE_RESPONSE_QUEUE = "voice_response_queue"
+VOICE_NIC_RESPONSE_QUEUE = "voice_nic_response_queue"
+
 class WhisperClient:
     async def get_text(self, audio_file_path: str) -> str:
         url = f"http://127.0.0.1:8080/inference"
@@ -67,7 +72,7 @@ class WhisperWorker:
             try:
                 # Get a blocking pop from the queue (blocking until an item is available)
                 path_data = redis_client.blpop(
-                    "whisper_queue", timeout=30
+                    WHISPER_QUEUE, timeout=30
                 )  # Timeout of 30 seconds
                 if not path_data or len(path_data) < 2:
                     continue
@@ -94,7 +99,7 @@ class WhisperWorker:
                                 100000, 999999
                             )  # Generate a random unique ID
                             redis_client.lpush(
-                                "voice_response_queue",
+                                VOICE_RESPONSE_QUEUE,
                                 json.dumps(
                                     {
                                         "unique_id": str(unique_id),
@@ -110,7 +115,7 @@ class WhisperWorker:
                                 100000, 999999
                             )  # Generate a random unique ID
                             redis_client.lpush(
-                                "voice_nic_response_queue",
+                                VOICE_NIC_RESPONSE_QUEUE,
                                 json.dumps(
                                     {
                                         "unique_id": str(unique_id),

@@ -20,6 +20,15 @@ from bot.processing import process_derf, process_nic
 from typing import List, Dict
 
 
+# Define constants for queue names
+DERF_RESPONSE_QUEUE = "voice_response_queue"
+DERF_RESPONSE_KEY_PREFIX = "response_queue"
+DERF_SUMMARIZER_QUEUE = "summarizer_queue"
+
+NIC_RESPONSE_QUEUE = "voice_nic_response_queue"
+NIC_RESPONSE_KEY_PREFIX = "response_nic_queue"
+NIC_SUMMARIZER_QUEUE = "summarizer_nic_queue"
+
 logger = setup_logger(__name__)
 
 
@@ -65,9 +74,9 @@ async def derfbot_ready():
         ],
         monitor_config={
             "bot_logic": derf_bot,
-            "queue_name": "voice_response_queue",
-            "response_key_prefix": "response_queue",
-            "summarizer_queue": "summarizer_queue",
+            "queue_name": DERF_RESPONSE_QUEUE,
+            "response_key_prefix": DERF_RESPONSE_KEY_PREFIX,
+            "summarizer_queue": DERF_SUMMARIZER_QUEUE,
             "process_audio_function": process_derf,
         },
     )
@@ -86,9 +95,9 @@ async def nicbot_ready():
         ],
         monitor_config={
             "bot_logic": nicole_bot,
-            "queue_name": "voice_nic_response_queue",
-            "response_key_prefix": "response_nic_queue",
-            "summarizer_queue": "summarizer_nic_queue",
+            "queue_name": NIC_RESPONSE_QUEUE,
+            "response_key_prefix": NIC_RESPONSE_KEY_PREFIX,
+            "summarizer_queue": NIC_SUMMARIZER_QUEUE,
             "process_audio_function": process_nic,
         },
     )
