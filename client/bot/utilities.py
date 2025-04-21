@@ -16,12 +16,6 @@ timeout = aiohttp.ClientTimeout(total=120)
 logger = setup_logger(__name__)
 
 # Constants for API interaction
-AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
-# WORKSPACE = "birthright"
-WORKSPACE = "a-new-workspace"
-NIC_WORKSPACE = "nic"
-SESSION_ID = "my-session-id"
-NIC_SESSION_ID = "my-session-id"
 LLM_HOST = os.getenv("LLM_HOST", "")
 GUILD_ID = os.getenv("GUILD_ID", "")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
@@ -219,10 +213,6 @@ class LLMClient:
                 logger.error(f"Exception during API call: {e}")
                 traceback.print_exc()
                 return "An error occurred while processing the request. Please try again later."
-
-
-derf_bot = LLMClient(AUTH_TOKEN, WORKSPACE, SESSION_ID)
-nicole_bot = LLMClient(AUTH_TOKEN, NIC_WORKSPACE, NIC_SESSION_ID)
 
 
 def split_text(text):  # This shouldn't be needed anymore since moving mostly to kokoro

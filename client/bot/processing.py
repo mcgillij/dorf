@@ -26,13 +26,14 @@ context_dict = {}
 LONG_RESPONSE_THRESHOLD = 1000
 
 
-async def queue_message_processing(ctx, message: str, bot_type: str = "derf") -> str:
+# Generalized function to queue message processing
+async def queue_message_processing(ctx, message: str, queue_name: str):
     unique_id = generate_unique_id(ctx, message)
-    logger.info(f"{bot_type.capitalize()}: Unique ID: {unique_id}")
+    logger.info(f"{queue_name.capitalize()}: Unique ID: {unique_id}")
+    # Store the context if not already stored
     context_dict.setdefault(unique_id, ctx)
+    # Queue the message for processing
     message = await replace_userids_with_username(message)
-
-    queue_name = "response_queue" if bot_type == "derf" else "response_nic_queue"
     redis_client.lpush(
         queue_name,
         json.dumps({"unique_id": unique_id, "message": f"{ctx.author.id}:{message}"}),
@@ -40,62 +41,92 @@ async def queue_message_processing(ctx, message: str, bot_type: str = "derf") ->
     return unique_id
 
 
-async def process_response(ctx, unique_id: str, bot_type: str = "derf"):
-    key = f"response{'' if bot_type == 'derf' else '_nic'}:{unique_id}"
+# Wrappers for specific queues
+async def queue_derf_message_processing(ctx, message: str):
+    return await queue_message_processing(ctx, message, "response_queue")
+
+
+async def queue_nic_message_processing(ctx, message: str):
+    return await queue_message_processing(ctx, message, "response_nic_queue")
+
+
+# Generalized function to process and send responses
+async def process_response(
+    ctx,
+    unique_id: str,
+    response_key_prefix: str,
+    summarizer_queue: str,
+    audio_queue_func,
+):
+    # Poll Redis for the result
+    key = f"{response_key_prefix}:{unique_id}"
     response = await poll_redis_for_key(key)
+    logger.debug(f"{response_key_prefix.capitalize()}: Response: {response}")
     response = await replace_userids_with_username(response)
     logger.debug(
-        f"{bot_type.capitalize()}: Response after replacing userids: {response}"
+        f"{response_key_prefix.capitalize()}: Response after replacing userids: {response}"
     )
-
+    # Send the response in chunks
     for response_chunk in split_message(response, 2000):
         await ctx.send(response_chunk)
-
+    # Check for voice channel users
     human_in_voice_channel = bool(
         ctx.guild.voice_client
         and any(not member.bot for member in ctx.guild.voice_client.channel.members)
     )
     logger.info(
-        f"{bot_type.capitalize()}: Are there users in voice chat?: {human_in_voice_channel}"
+        f"{response_key_prefix.capitalize()}: Are there users in voice chat?: {human_in_voice_channel}"
     )
-
+    # Summarize response if it's long
     if len(response) > LONG_RESPONSE_THRESHOLD:
-        summarizer_queue = f"summarizer{'' if bot_type == 'derf' else '_nic'}_queue"
         redis_client.lpush(
             summarizer_queue,
             json.dumps({"unique_id": unique_id, "message": response}),
         )
-        summary_key = f"summarizer{'' if bot_type == 'derf' else '_nic'}:{unique_id}"
+        summary_key = f"{summarizer_queue}:{unique_id}"
         summary_response = await poll_redis_for_key(summary_key)
         await ctx.send(summary_response)
         if human_in_voice_channel:
-            await process_audio_queue(unique_id, [summary_response], bot_type)
+            await audio_queue_func(unique_id, [summary_response])
     else:
         if human_in_voice_channel:
-            await process_audio_queue(unique_id, [response], bot_type)
+            await audio_queue_func(unique_id, [response])
 
 
-async def process_audio_queue(
-    unique_id: str, messages: list[str], bot_type: str = "derf"
-):
-    audio_queue = "audio_queue" if bot_type == "derf" else "audio_nic_queue"
-    for index, msg in enumerate(messages, start=1):
-        redis_client.lpush(audio_queue, f"{unique_id}|{index}|{msg}")
+# Wrappers for specific response processing
+async def process_derf_response(ctx, unique_id: str):
+    await process_response(
+        ctx,
+        unique_id,
+        "response",
+        "summarizer_queue",
+        process_derf_audio_queue,
+    )
 
 
-# wrapper functions for derf and nic bots
-async def queue_derf(ctx, message: str):
-    return await queue_message_processing(ctx, message, bot_type="derf")
+async def process_nic_response(ctx, unique_id: str):
+    await process_response(
+        ctx,
+        unique_id,
+        "response_nic",
+        "summarizer_nic_queue",
+        process_nic_audio_queue,
+    )
 
 
-async def process_derf(ctx, unique_id: str):
-    await process_response(ctx, unique_id, bot_type="derf")
+# Generalized function to process audio queue
+async def process_audio_queue(unique_id: str, messages: list[str], queue_name: str):
+    """Queues messages for audio generation if users are in the voice channel."""
+    index = 1
+    for msg in messages:
+        redis_client.lpush(queue_name, f"{unique_id}|{index}|{msg}")
+        index += 1
 
 
-# For nic bot
-async def queue_nic(ctx, message: str):
-    return await queue_message_processing(ctx, message, bot_type="nic")
+# Wrappers for specific audio queues
+async def process_derf_audio_queue(unique_id: str, messages: list[str]):
+    await process_audio_queue(unique_id, messages, "audio_queue")
 
 
-async def process_nic(ctx, unique_id: str):
-    await process_response(ctx, unique_id, bot_type="nic")
+async def process_nic_audio_queue(unique_id: str, messages: list[str]):
+    await process_audio_queue(unique_id, messages, "audio_nic_queue")

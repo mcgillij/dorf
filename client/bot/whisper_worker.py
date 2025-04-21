@@ -31,6 +31,7 @@ WHISPER_QUEUE = "whisper_queue"
 VOICE_RESPONSE_QUEUE = "voice_response_queue"
 VOICE_NIC_RESPONSE_QUEUE = "voice_nic_response_queue"
 
+
 class WhisperClient:
     async def get_text(self, audio_file_path: str) -> str:
         url = f"http://127.0.0.1:8080/inference"

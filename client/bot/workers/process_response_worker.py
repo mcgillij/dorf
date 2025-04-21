@@ -3,8 +3,9 @@ import redis
 import json
 import traceback
 
-from bot.utilities import derf_bot, nicole_bot, replace_userids_with_username
+from bot.utilities import replace_userids_with_username
 from bot.log_config import setup_logger
+from bot.commands import bot, nic_bot
 
 logger = setup_logger(__name__)
 
@@ -41,8 +42,8 @@ async def process_response_queue(queue_name, response_key_prefix, bot):
 
 
 async def process_derf_response_queue():
-    await process_response_queue("response_queue", "response", derf_bot)
+    await process_response_queue("response_queue", "response", bot.llm)
 
 
 async def process_nic_response_queue():
-    await process_response_queue("response_nic_queue", "response_nic", nicole_bot)
+    await process_response_queue("response_nic_queue", "response_nic", nic_bot.llm)

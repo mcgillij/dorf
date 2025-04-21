@@ -4,7 +4,7 @@ import os
 import asyncio
 
 from bot.commands import bot, nic_bot, connect_to_voice, message_dispatcher
-from bot.utilities import setup_logger, derf_bot, nicole_bot
+from bot.utilities import setup_logger
 from bot.workers.process_response_worker import (
     process_derf_response_queue,
     process_nic_response_queue,
@@ -15,8 +15,11 @@ from bot.workers.process_summarizer_worker import (
 )
 from bot.workers.audio_worker import derf_audio_task, nic_audio_task
 from bot.workers.playback_worker import playback_derf_task, playback_nic_task
-from bot.workers.voice_queue_processor import start_monitor_task
-from bot.processing import process_derf, process_nic
+from bot.workers.voice_queue_processor import (
+    monitor_derf_response_queue,
+    monitor_nic_response_queue,
+)
+
 from typing import List, Dict
 
 
@@ -37,7 +40,6 @@ async def setup_bot(
     name: str,
     voice_connector,
     worker_tasks: List[asyncio.Task],
-    monitor_config: Dict,
 ):
     await bot_instance.wait_until_ready()
     logger.info(f"{name} is ready: Logged in as {bot_instance.user.name}")
@@ -46,16 +48,6 @@ async def setup_bot(
 
     for task in worker_tasks:
         asyncio.create_task(task())
-
-    start_monitor_task(
-        bot_instance=bot_instance,
-        bot_logic=monitor_config["bot_logic"],
-        queue_name=monitor_config["queue_name"],
-        response_key_prefix=monitor_config["response_key_prefix"],
-        summarizer_queue=monitor_config["summarizer_queue"],
-        process_audio_function=monitor_config["process_audio_function"],
-        logger_name=name,
-    )
 
     logger.info(f"{name} startup complete")
 
@@ -71,14 +63,8 @@ async def derfbot_ready():
             process_derf_response_queue,
             process_derf_summarizer_queue,
             message_dispatcher,
+            monitor_derf_response_queue,
         ],
-        monitor_config={
-            "bot_logic": derf_bot,
-            "queue_name": DERF_RESPONSE_QUEUE,
-            "response_key_prefix": DERF_RESPONSE_KEY_PREFIX,
-            "summarizer_queue": DERF_SUMMARIZER_QUEUE,
-            "process_audio_function": process_derf,
-        },
     )
 
 
@@ -92,14 +78,8 @@ async def nicbot_ready():
             playback_nic_task,
             process_nic_response_queue,
             process_nic_summarizer_queue,
+            monitor_nic_response_queue,
         ],
-        monitor_config={
-            "bot_logic": nicole_bot,
-            "queue_name": NIC_RESPONSE_QUEUE,
-            "response_key_prefix": NIC_RESPONSE_KEY_PREFIX,
-            "summarizer_queue": NIC_SUMMARIZER_QUEUE,
-            "process_audio_function": process_nic,
-        },
     )
 
 

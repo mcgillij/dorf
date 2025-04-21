@@ -11,10 +11,10 @@ from discord.ext.voice_recv import VoiceRecvClient
 from dotenv import load_dotenv
 
 from bot.processing import (
-    queue_derf,
-    queue_nic,
-    process_derf,
-    process_nic,
+    queue_derf_message_processing,
+    queue_nic_message_processing,
+    process_derf_response,
+    process_nic_response,
 )
 
 from bot.utilities import filtered_responses, filter_message, split_message
@@ -24,10 +24,17 @@ from bot.log_config import setup_logger
 from bot.lms import (
     search_with_tool,
 )
-
+from bot.utilities import LLMClient
 from bot.audio_capture import RingBufferAudioSink
 
 load_dotenv()
+
+AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
+# WORKSPACE = "birthright"
+WORKSPACE = "a-new-workspace"
+NIC_WORKSPACE = "nic"
+SESSION_ID = "my-session-id"
+NIC_SESSION_ID = "my-session-id"
 
 logger = setup_logger(__name__)
 
@@ -118,8 +125,8 @@ async def derf(ctx, *, message: str):
     if filter_message(message):
         await ctx.send(choice(filtered_responses))
         return
-    uid = await queue_derf(ctx, message)
-    await process_derf(ctx, uid)
+    uid = await queue_derf_message_processing(ctx, message)
+    await process_derf_response(ctx, uid)
 
 
 @commands.command(name="roll", aliases=["r"])  # Command name is !roll, alias !r
@@ -194,6 +201,7 @@ class DerfBot(BaseBot):
         self.add_command(spack)
         self.add_command(frieren)
         self.add_listener(self.on_voice_state_update)
+        self.llm = LLMClient(AUTH_TOKEN, WORKSPACE, SESSION_ID)
 
     async def on_voice_state_update(self, member, before, after):
         await handle_voice_state_update(self, member, before, after)
@@ -201,14 +209,15 @@ class DerfBot(BaseBot):
 
 @commands.command()
 async def nic(ctx, *, message: str):
-    uid = await queue_nic(ctx, message)
-    await process_nic(ctx, uid)
+    uid = await queue_nic_message_processing(ctx, message)
+    await process_nic_response(ctx, uid)
 
 
 class NicBot(BaseBot):
     def __init__(self, *args, **kwargs):
         super().__init__(name="nic_bot", prefix="#", *args, **kwargs)
         self.add_command(nic)
+        self.llm = LLMClient(AUTH_TOKEN, NIC_WORKSPACE, NIC_SESSION_ID)
 
 
 # shared by the bots
