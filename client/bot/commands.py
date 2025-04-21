@@ -66,8 +66,8 @@ async def message_dispatcher():
         await asyncio.sleep(1)  # Adjust this to control rate
 
 
-async def enqueue_message(channel, content):
-    await message_queue.put((channel, content))
+# async def enqueue_message(channel, content):
+# await message_queue.put((channel, content))
 
 
 def enqueue_message(channel, content):
@@ -222,20 +222,27 @@ class DerfBot(BaseBot):
         self.add_listener(self.on_voice_state_update)
         self.llm = LLMClient(AUTH_TOKEN, WORKSPACE, SESSION_ID)
 
-    # shared by the bots
     async def handle_voice_state_update(self, member, before, after):
         logger.info(
             f"{self.name}: Voice update for {member} | {before.channel} -> {after.channel}"
         )
 
-        if member == self.user or member.bot:
-            if not after.channel and before.channel:
+        if member == self.user:
+            if after.channel and not before.channel:
+                logger.info(f"{self.name} joined a voice channel, starting capture.")
+                await start_capture(member.guild, after.channel, self)
+            elif not after.channel and before.channel:
                 logger.warning(f"{self.name} disconnected. Reconnecting...")
                 await connect_to_voice(self)
-            elif after.channel and not before.channel:
+            return
+
+        # For regular users:
+        if after.channel and not before.channel:
+            logger.info(f"User {member} joined a voice channel.")
+            if member.guild.voice_client:
+                # If bot is already connected, maybe do something
+                logger.info(f"Bot already connected, ensuring capture is active.")
                 await start_capture(member.guild, after.channel, self)
-        elif after.channel and not before.channel:
-            await start_capture(member.guild, after.channel, self)
 
     async def on_voice_state_update(self, member, before, after):
         if member.bot:
@@ -243,21 +250,45 @@ class DerfBot(BaseBot):
             return
         await self.handle_voice_state_update(member=member, before=before, after=after)
 
+    async def on_ready(self):
+        await super().on_ready()
+        logger.info(f"{self.name} is ready. Checking voice connections...")
+        for guild in self.guilds:
+            voice_channel = discord.utils.get(
+                guild.voice_channels, id=int(os.getenv("VOICE_CHANNEL_ID", 0))
+            )
+            if voice_channel:
+                await start_capture(guild, voice_channel, self)
 
-async def start_capture(guild, channel, b):
-    logger.info(f"in: {b=}")
+
+async def start_capture(guild, channel, bot):
+    logger.info(f"Starting capture in {channel.name} for bot {bot.name}")
     try:
         vc = guild.voice_client
-        if vc is None or vc.channel != channel:
+        if vc is None or not vc.is_connected():
+            logger.info("Not connected yet. Connecting to voice...")
             vc = await channel.connect(cls=VoiceRecvClient)
 
-        if vc.is_listening():
-            logger.info("Already capturing audio.")
+        if vc is None or not vc.is_connected():
+            logger.error("Failed to connect to voice, aborting capture.")
             return
 
-        ring_buffer_sink = RingBufferAudioSink(bot=b, buffer_size=1024 * 1024)
+        if vc.is_listening():
+            logger.info("Already listening, resetting sink...")
+            vc.stop_listening()
+
+        ring_buffer_sink = RingBufferAudioSink(bot=bot, buffer_size=1024 * 1024)
         vc.listen(ring_buffer_sink)
-        logger.info(f"Recording started in channel {channel}")
+        logger.info(f"Recording started in channel {channel.name}")
+        logger.info(f"Sweeping channel {channel.name} for existing members...")
+        for member in channel.members:
+            if member.bot:
+                continue
+            logger.info(
+                f"Detected existing member {member.display_name}. Initializing capture."
+            )
+            await bot.handle_voice_state_update(member, None, member.voice)
+
     except Exception as e:
         logger.error(f"Error in start_capture: {e}")
 

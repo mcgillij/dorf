@@ -20,7 +20,7 @@ from bot.workers.voice_queue_processor import (
     monitor_nic_response_queue,
 )
 
-from typing import List, Dict
+from typing import List
 
 
 # Define constants for queue names

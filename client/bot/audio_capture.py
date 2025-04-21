@@ -125,7 +125,7 @@ class RingBufferAudioSink(AudioSink):
                 current_time = time.time()
                 for user_id, last_time in list(self.last_audio_time.items()):
                     # If we haven't received audio for 0.5 seconds (adjust as needed)
-                    if current_time - last_time > 0.5:
+                    if current_time - last_time > 0.3:
                         if (
                             user_id in self.ring_buffers
                             and not self.ring_buffers[user_id].is_empty()
@@ -213,13 +213,13 @@ class VoiceRecvClient(discord.VoiceProtocol):
         super().__init__(client, channel)
         self.audio_sink = None
 
-    async def on_ready(self):
-        logger.info("VoiceRecvClient on_ready")
-        if self.audio_sink:
-            await self.send_audio_packet(b"", True)
+    # async def on_ready(self):
+    #     logger.info("VoiceRecvClient on_ready")
+    #     if self.audio_sink:
+    #         await self.send_audio_packet(b"", True)
 
-    async def send_audio_packet(self, data, is_last=False):
-        logger.info(f"Sending audio packet to sink: {self.audio_sink}")
-        if not self.audio_sink:
-            return
-        await self.audio_sink.read(data)
+    # async def send_audio_packet(self, data, is_last=False):
+    #     logger.info(f"Sending audio packet to sink: {self.audio_sink}")
+    #     if not self.audio_sink:
+    #         return
+    #     await self.audio_sink.read(data)
