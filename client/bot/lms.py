@@ -59,7 +59,7 @@ async def search_with_tool(query: str, callback) -> str:
     response = await wrap_model_act(
         model,
         query
-        + " always use your search_tool and add the sources as links at the end, give your response in text, never JSON",
+        + " always use your 'search_tool' and add the sources as links at the end, give your response in text, never JSON",
         [search_tool],
         callback=callback,
     )
