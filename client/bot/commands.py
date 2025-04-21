@@ -129,9 +129,7 @@ async def roll_dice(ctx, *, dice_notation: str):
     clean_notation = dice_notation.strip()  # Remove leading/trailing whitespace
 
     if not clean_notation:
-        await ctx.send(
-            f"Usage: `{self.command_prefix}roll <dice_notation>` (e.g., `{self.command_prefix}roll 2d6+3`)"
-        )
+        await ctx.send(f"Usage: `!r <dice_notation>` (e.g., `!roll 2d6+3`)")
         return
 
     logger.info(f"Dice roll requested by {ctx.author}: {clean_notation}")

@@ -49,6 +49,8 @@ class WhisperClient:
                 return "The whisper request timed out. Please try again later."
             except Exception as e:
                 logger.info(f"Exception during API call: {e}")
+                import traceback
+
                 traceback.print_exc()
                 return "An error occurred while processing the request. Please try again later."
 

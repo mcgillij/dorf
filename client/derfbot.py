@@ -6,17 +6,19 @@ import asyncio
 from bot.commands import bot, nic_bot, connect_to_voice, message_dispatcher
 from bot.utilities import setup_logger, derf_bot, nicole_bot
 from bot.workers.process_response_worker import (
-    process_response_queue,
+    process_derf_response_queue,
     process_nic_response_queue,
 )
 from bot.workers.process_summarizer_worker import (
-    process_summarizer_queue,
+    process_derf_summarizer_queue,
     process_nic_summarizer_queue,
 )
-from bot.workers.mimic_audio_worker import mimic_audio_task, mimic_nic_audio_task
-from bot.workers.playback_worker import playback_task, playback_nic_task
+from bot.workers.audio_worker import derf_audio_task, nic_audio_task
+from bot.workers.playback_worker import playback_derf_task, playback_nic_task
 from bot.workers.voice_queue_processor import start_monitor_task
 from bot.processing import process_derf, process_nic
+from typing import List, Dict
+
 
 logger = setup_logger(__name__)
 
@@ -25,8 +27,8 @@ async def setup_bot(
     bot_instance,
     name: str,
     voice_connector,
-    worker_tasks: list,
-    monitor_config: dict,
+    worker_tasks: List[asyncio.Task],
+    monitor_config: Dict,
 ):
     await bot_instance.wait_until_ready()
     logger.info(f"{name} is ready: Logged in as {bot_instance.user.name}")
@@ -55,10 +57,10 @@ async def derfbot_ready():
         name="DerfBot",
         voice_connector=connect_to_voice,
         worker_tasks=[
-            mimic_audio_task,
-            playback_task,
-            process_response_queue,
-            process_summarizer_queue,
+            derf_audio_task,
+            playback_derf_task,
+            process_derf_response_queue,
+            process_derf_summarizer_queue,
             message_dispatcher,
         ],
         monitor_config={
@@ -77,7 +79,7 @@ async def nicbot_ready():
         name="NicBot",
         voice_connector=connect_to_voice,
         worker_tasks=[
-            mimic_nic_audio_task,
+            nic_audio_task,
             playback_nic_task,
             process_nic_response_queue,
             process_nic_summarizer_queue,
