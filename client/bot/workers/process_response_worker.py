@@ -4,10 +4,10 @@ import json
 import traceback
 
 from bot.utilities import replace_userids_with_username
-from bot.log_config import setup_logger
-from bot.commands import bot, nic_bot
+from bot.client import derf_bot, nic_bot
+import logging
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # Initialize Redis client
 redis_client = redis.Redis(host="0.0.0.0", port=6379, decode_responses=True)
@@ -42,7 +42,7 @@ async def process_response_queue(queue_name, response_key_prefix, bot):
 
 
 async def process_derf_response_queue():
-    await process_response_queue("response_queue", "response", bot.llm)
+    await process_response_queue("response_queue", "response", derf_bot.llm)
 
 
 async def process_nic_response_queue():

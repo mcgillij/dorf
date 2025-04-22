@@ -10,11 +10,11 @@ import discord
 from discord.ext.voice_recv import AudioSink, VoiceData
 import redis
 from dotenv import load_dotenv
-from bot.log_config import setup_logger
 from typing import Dict
 import asyncio
+import logging
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 # Configure Redis

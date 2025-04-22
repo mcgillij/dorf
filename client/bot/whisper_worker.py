@@ -6,10 +6,10 @@ import redis
 import asyncio  # Ensure you have this imported for running async code
 from dotenv import load_dotenv
 import aiohttp
-from log_config import setup_logger
 from db import SQLiteDB
+import logging
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 # Configure Redis

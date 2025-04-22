@@ -2,9 +2,10 @@
 
 import os
 import asyncio
-
-from bot.commands import bot, nic_bot, connect_to_voice, message_dispatcher
-from bot.utilities import setup_logger
+from bot.client import derf_bot, nic_bot
+from bot.commands import connect_to_voice, message_dispatcher
+from bot.log_config import setup_logging
+import logging
 from bot.workers.process_response_worker import (
     process_derf_response_queue,
     process_nic_response_queue,
@@ -32,7 +33,8 @@ NIC_RESPONSE_QUEUE = "voice_nic_response_queue"
 NIC_RESPONSE_KEY_PREFIX = "response_nic_queue"
 NIC_SUMMARIZER_QUEUE = "summarizer_nic_queue"
 
-logger = setup_logger(__name__)
+setup_logging()
+logger = logging.getLogger(__name__)
 
 
 async def setup_bot(
@@ -53,8 +55,10 @@ async def setup_bot(
 
 
 async def derfbot_ready():
+    derf_bot.loop.create_task(message_dispatcher(derf_bot))  # PASS the bot into it!
+    await derf_bot.load_extension("bot.leveling")
     await setup_bot(
-        bot_instance=bot,
+        bot_instance=derf_bot,
         name="DerfBot",
         voice_connector=connect_to_voice,
         worker_tasks=[
@@ -62,7 +66,6 @@ async def derfbot_ready():
             playback_derf_task,
             process_derf_response_queue,
             process_derf_summarizer_queue,
-            message_dispatcher,
             monitor_derf_response_queue,
         ],
     )
@@ -83,7 +86,7 @@ async def nicbot_ready():
     )
 
 
-@bot.event
+@derf_bot.event
 async def on_ready():
     await derfbot_ready()
 
@@ -95,7 +98,7 @@ async def on_ready():
 
 async def main():
     await asyncio.gather(
-        bot.start(os.getenv("DISCORD_BOT_TOKEN", "")),
+        derf_bot.start(os.getenv("DISCORD_BOT_TOKEN", "")),
         nic_bot.start(os.getenv("NIC_DISCORD_BOT_TOKEN", "")),
     )
 

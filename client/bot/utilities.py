@@ -7,13 +7,13 @@ import asyncio
 import traceback
 import redis
 import hashlib
-from bot.log_config import setup_logger
+import logging
 
 dotenv.load_dotenv()
 
 timeout = aiohttp.ClientTimeout(total=120)
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # Constants for API interaction
 LLM_HOST = os.getenv("LLM_HOST", "")

@@ -1,9 +1,10 @@
 import json
 import aiohttp
 from typing import List, Dict
-from bot.log_config import setup_logger
+import logging
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
+
 SEARCH_URL = "https://searx.mcgillij.dev"
 RELEVANT_THRESHOLD = 0.5
 

@@ -1,8 +1,8 @@
 import sqlite3
 from datetime import datetime
-from log_config import setup_logger
+import logging
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class SQLiteDB:

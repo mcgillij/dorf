@@ -23,7 +23,7 @@ from bot.processing import (
 
 from bot.utilities import filtered_responses, filter_message, split_message
 
-from bot.log_config import setup_logger
+import logging
 
 from bot.lms import (
     search_with_tool,
@@ -67,13 +67,27 @@ NIC_WORKSPACE = "nic"
 SESSION_ID = "my-session-id"
 NIC_SESSION_ID = "my-session-id"
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # Configure bot and intents
 INTENTS = discord.Intents.default()
 INTENTS.message_content = True
 INTENTS.voice_states = True
+INTENTS.emojis = True
+INTENTS.emojis_and_stickers = True
+INTENTS.guilds = True
+INTENTS.guild_messages = True
+INTENTS.guild_reactions = True
+INTENTS.guild_scheduled_events = True
+INTENTS.guild_polls = True
 INTENTS.members = True
+INTENTS.messages = True
+INTENTS.moderation = True
+INTENTS.polls = True
+INTENTS.presences = True
+INTENTS.reactions = True
+INTENTS.typing = True
+
 
 SPACK_DIR = "spack/"
 FRIEREN_DIR = "frieren/"
@@ -83,7 +97,7 @@ message_queue = asyncio.Queue()
 
 
 # Background task to process the queue
-async def message_dispatcher():
+async def message_dispatcher(bot):
     await bot.wait_until_ready()
     while not bot.is_closed():
         channel, content = await message_queue.get()
@@ -188,10 +202,10 @@ async def poll(ctx, *, question: str):
     active_polls[poll_id]["message_id"] = message.id
 
     # Start background task
-    bot.loop.create_task(close_poll_after_delay(poll_id, view))
+    ctx.bot.loop.create_task(close_poll_after_delay(ctx, poll_id, view))
 
 
-async def close_poll_after_delay(poll_id, view):
+async def close_poll_after_delay(ctx, poll_id, view):
     await asyncio.sleep(300)  # 5 minutes
     view.close_poll()
 
@@ -199,7 +213,7 @@ async def close_poll_after_delay(poll_id, view):
     if not poll:
         return
 
-    channel = bot.get_channel(poll["channel_id"])
+    channel = ctx.bot.get_channel(poll["channel_id"])
     if not channel:
         return
 
@@ -387,7 +401,7 @@ async def emoji_leaderboard(ctx, top_n: int = 10):
     # Fetch usernames
     leaderboard_entries = []
     for user_id, emoji_stats in user_emoji_stats.items():
-        user = await bot.fetch_user(user_id)
+        user = await ctx.bot.fetch_user(user_id)
         username = user.display_name if user else f"User {user_id}"
 
         total_user_usage = sum(count for _, count in emoji_stats)
@@ -618,8 +632,3 @@ async def emojistats(ctx, user: discord.User = None):
 
     stats = "\n".join([f"{emoji} — {count} times" for emoji, count in results])
     await ctx.send(f"**Top emojis for {user.display_name}:**\n{stats}")
-
-
-# instantiate my bots here temporarily, need to refactor this
-bot = DerfBot()
-nic_bot = NicBot()

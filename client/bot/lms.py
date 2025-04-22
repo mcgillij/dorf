@@ -4,9 +4,9 @@ from typing import List, Dict
 
 from bot.tools.searxng_search import search_internet
 
-from bot.log_config import setup_logger
+import logging
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 MAX_PREDICTION_ROUNDS = 10
 
 

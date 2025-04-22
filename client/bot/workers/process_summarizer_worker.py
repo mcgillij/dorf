@@ -2,11 +2,10 @@ import asyncio
 import redis
 import json
 import traceback
-from bot.utilities import logger
-from bot.commands import bot, nic_bot
-from bot.log_config import setup_logger
+from bot.client import derf_bot, nic_bot
+import logging
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 redis_client = redis.Redis(host="0.0.0.0", port=6379, decode_responses=True)
 
@@ -41,7 +40,7 @@ async def process_derf_summarizer_queue():
     """
     Wrapper for processing the summarizer queue using derf_bot.
     """
-    await process_queue("summarizer_queue", bot.llm, "summarizer")
+    await process_queue("summarizer_queue", derf_bot.llm, "summarizer")
 
 
 async def process_nic_summarizer_queue():

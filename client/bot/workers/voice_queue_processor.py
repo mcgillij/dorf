@@ -3,13 +3,12 @@ import os
 import json
 import asyncio
 import redis
-from bot.commands import bot, nic_bot
-from bot.log_config import setup_logger
+import logging
 
 from dotenv import load_dotenv
 
 from bot.utilities import split_message
-from bot.commands import bot, nic_bot
+from bot.client import derf_bot, nic_bot
 from bot.processing import (
     poll_redis_for_key,
     LONG_RESPONSE_THRESHOLD,
@@ -17,7 +16,7 @@ from bot.processing import (
     process_nic_audio_queue,
 )
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 # Configure Redis
@@ -125,7 +124,7 @@ async def monitor_derf_response_queue():
     """Monitor the Redis voice response queue."""
     await process_response_queue(
         "voice_response_queue",
-        bot,
+        derf_bot,
         process_derf_audio_queue,
         "summarizer_queue",
     )

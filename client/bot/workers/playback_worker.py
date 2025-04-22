@@ -2,11 +2,11 @@ import asyncio
 import redis
 import os
 import discord
-from bot.commands import bot, nic_bot
-from bot.log_config import setup_logger
+from bot.client import derf_bot, nic_bot
 from dotenv import load_dotenv
+import logging
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 load_dotenv()
 
 VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID", ""))
@@ -81,7 +81,7 @@ async def playback_derf_task():
     """
     Wrapper for the playback task for the main bot.
     """
-    await playback_task(bot, "playback_queue", VOICE_CHANNEL_ID)
+    await playback_task(derf_bot, "playback_queue", VOICE_CHANNEL_ID)
 
 
 async def playback_nic_task():

@@ -1,10 +1,13 @@
 import logging
 
 
-def setup_logger(name: str) -> logging.Logger:
-    logger = logging.getLogger(name)
-    FORMAT = "%(asctime)s - %(message)s"
-    logging.basicConfig(format=FORMAT)
-    logger.addHandler(logging.FileHandler("derf.log"))
-    logger.setLevel(logging.DEBUG)
-    return logger
+def setup_logging():
+    FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    logging.basicConfig(
+        level=logging.INFO,
+        format=FORMAT,
+        handlers=[
+            logging.FileHandler("bot.log"),
+            logging.StreamHandler(),  # Optional: also print logs to console
+        ],
+    )

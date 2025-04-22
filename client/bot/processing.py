@@ -1,5 +1,6 @@
 import json
 import os
+import logging
 
 import redis
 from dotenv import load_dotenv
@@ -10,9 +11,8 @@ from bot.utilities import (
     poll_redis_for_key,
     replace_userids_with_username,
 )
-from bot.log_config import setup_logger
 
-logger = setup_logger(__name__)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 # Configure Redis
