@@ -98,11 +98,8 @@ class Leveling(commands.Cog):
             try:
                 await member.remove_roles(*roles_to_remove)
                 await member.add_roles(roles_to_assign[-1])  # Assign highest one
-                await member.send(
-                    f"🎉 Congrats {member.display_name}! You've been promoted to **{roles_to_assign[-1].name}**!"
-                )
-            except discord.Forbidden:
-                print(f"Missing permissions to edit roles for {member.display_name}")
+            except (discord.Forbidden, discord.HTTPException) as e:
+                logger.error(f"Failed to assign roles for {member.display_name}: {e}")
 
     async def add_xp(self, user_id, amount, guild=None):
         with sqlite3.connect(XP_DB) as conn:
@@ -136,12 +133,23 @@ class Leveling(commands.Cog):
                 )
 
                 conn.commit()
-
-                # ⚡ If leveled up, check for role promotion
                 if new_level > old_level and guild:
                     member = guild.get_member(user_id)
-                    if member:
-                        await self.check_and_assign_roles(member, new_level)
+                    if member is None:
+                        try:
+                            member = await guild.fetch_member(user_id)
+                        except discord.NotFound:
+                            logger.warning(f"Member {user_id} not found in guild {guild.name}")
+                            return
+
+                    await self.check_and_assign_roles(member, new_level)
+
+                    # OPTIONAL: send a public level up message!
+                    if member.guild.system_channel:  # Check it exists
+                        await member.guild.system_channel.send(
+                            f"🎉 {member.mention} leveled up to **{new_level}** and became a **{self.get_title_for_level(new_level)}**!"
+                        )
+
             else:
                 xp = amount
                 level = 1
