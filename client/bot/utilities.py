@@ -1,83 +1,17 @@
-import os
 import re
-import dotenv
 from random import randint
 import aiohttp
 import asyncio
 import traceback
-import redis
 import hashlib
 import logging
-
-dotenv.load_dotenv()
+from bot.redis_client import redis_client
+from bot.config import LLM_HOST
+from bot.constants import FILTERED_KEYWORDS
 
 timeout = aiohttp.ClientTimeout(total=120)
 
 logger = logging.getLogger(__name__)
-
-# Constants for API interaction
-LLM_HOST = os.getenv("LLM_HOST", "")
-GUILD_ID = os.getenv("GUILD_ID", "")
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
-
-redis_client = redis.Redis(decode_responses=True)
-# filtered words
-filtered_keywords = {
-    "behavior driven development",
-    "QA",
-    "BDD",
-    "pytest",
-    "testing",
-    "gherkin",
-    "test",
-    "specflow",
-    "cypress",
-    "playwrite",
-}  # Add the keywords to filter
-
-filtered_responses = [
-    "Nice try nerd!",
-    "Nice try, but you're still a noob.",
-    "Almost there, but not close enough.",
-    "You missed by a mile!",
-    "Not quite, keep trying harder!",
-    "Close, but you need to step it up.",
-    "You were almost there, but not quite.",
-    "Good effort, now go learn more.",
-    "Almost had it, but not quite enough.",
-    "Nice shot, just a little off.",
-    "Almost got it, but still missing the mark.",
-    "You're close, but need to practice more.",
-    "Almost there, but you’re slipping.",
-    "Good try, now go study up.",
-    "Not exactly right, but keep trying!",
-    "Close enough for a joke, but not real.",
-    "Nice effort, just need a bit more focus.",
-    "You were almost there, but still off.",
-    "Good start, now go get it right.",
-    "Almost had it, but missed by a long shot.",
-    "Nice attempt, but you're not there yet.",
-    "Close, but you need to work harder.",
-    "You were almost there, but still off-base.",
-    "Good effort, now go get it right.",
-    "Almost got it, just a little more.",
-    "Nice try, but the answer eludes you.",
-    "Close enough for a laugh, not real.",
-    "You were almost there, but still off.",
-    "Good effort, now go get it right!",
-    "Almost had it, just need to focus more.",
-    "Nice try, but the answer is eluding you.",
-    "Close enough for a joke, not real.",
-    "You were almost there, but still off.",
-    "Good effort, now go get it right!",
-    "Almost got it, just need to focus more.",
-    "Nice attempt, but the answer is elusive.",
-    "Close enough for a laugh, not real.",
-    "You were almost there, but still off.",
-    "Good effort, now go get it right!",
-    "Almost had it, just need to focus more.",
-    "Nice try, but the answer is elusive.",
-]
 
 
 async def replace_userids_with_username(text: str) -> str:
@@ -117,7 +51,7 @@ async def sanitize_userid(user_id: int):
 
 
 def filter_message(message: str) -> bool:
-    return any(keyword.lower() in message.lower() for keyword in filtered_keywords)
+    return any(keyword.lower() in message.lower() for keyword in FILTERED_KEYWORDS)
 
 
 def generate_unique_id(ctx, message: str) -> str:

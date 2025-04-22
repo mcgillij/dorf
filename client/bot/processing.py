@@ -1,9 +1,5 @@
 import json
-import os
 import logging
-
-import redis
-from dotenv import load_dotenv
 
 from bot.utilities import (
     split_message,
@@ -11,19 +7,13 @@ from bot.utilities import (
     poll_redis_for_key,
     replace_userids_with_username,
 )
+from bot.redis_client import redis_client
+from bot.constants import LONG_RESPONSE_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
-# Configure Redis
-REDIS_HOST = os.getenv("REDIS_HOST", "")
-REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
-
 # Context dictionary
 context_dict = {}
-
-LONG_RESPONSE_THRESHOLD = 1000
 
 
 # Generalized function to queue message processing

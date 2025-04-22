@@ -1,16 +1,11 @@
 import asyncio
-import redis
 import os
 import discord
-from dotenv import load_dotenv
 import logging
+from bot.redis_client import redis_client
+from bot.config import VOICE_CHANNEL_ID
 
 logger = logging.getLogger(__name__)
-load_dotenv()
-
-VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID", ""))
-
-redis_client = redis.Redis(host="0.0.0.0", port=6379, decode_responses=True)
 
 
 async def playback_task(bot_instance, queue_name, voice_channel_id):

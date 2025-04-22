@@ -12,7 +12,6 @@ import discord
 from discord.ext import commands
 from discord.ext.voice_recv import VoiceRecvClient
 
-from dotenv import load_dotenv
 from bot.poll import PollView, active_polls
 from bot.processing import (
     queue_derf_message_processing,
@@ -20,7 +19,7 @@ from bot.processing import (
     process_derf_response,
     process_nic_response,
 )
-from bot.utilities import filtered_responses, filter_message, split_message
+from bot.utilities import filter_message, split_message
 from bot.lms import (
     search_with_tool,
 )
@@ -29,10 +28,22 @@ from bot.audio_capture import RingBufferAudioSink
 
 from bot.quotes import addquote, listquotes, quote, deletequote, searchquote
 
+from bot.constants import (
+    EMOJI_DB,
+    WORKSPACE,
+    NIC_WORKSPACE,
+    SESSION_ID,
+    NIC_SESSION_ID,
+    SPACK_DIR,
+    FRIEREN_DIR,
+    FILTERED_RESPONSES,
+)
+from bot.config import AUTH_TOKEN
+
+
 logger = logging.getLogger(__name__)
 
 CUSTOM_EMOJI_REGEX = re.compile(r"<a?:\w+:\d+>")
-EMOJI_DB = "emojis.db"
 
 conn = sqlite3.connect(EMOJI_DB)
 c = conn.cursor()
@@ -51,19 +62,6 @@ c.execute(
 """
 )
 conn.commit()
-
-load_dotenv()
-
-AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
-if not AUTH_TOKEN:
-    raise ValueError(
-        "AUTH_TOKEN is missing. Please set it in the environment variables."
-    )
-WORKSPACE = "birthright"
-# WORKSPACE = "a-new-workspace"
-NIC_WORKSPACE = "nic"
-SESSION_ID = "my-session-id"
-NIC_SESSION_ID = "my-session-id"
 
 
 # Configure bot and intents
@@ -85,9 +83,6 @@ INTENTS.presences = True
 INTENTS.reactions = True
 INTENTS.typing = True
 
-
-SPACK_DIR = "spack/"
-FRIEREN_DIR = "frieren/"
 
 # message queue to not get rate limited hopefully by discord
 message_queue = asyncio.Queue()
@@ -170,7 +165,7 @@ class BaseBot(commands.Bot):
 async def derf(ctx, *, message: str):
     logger.info("in derf")
     if filter_message(message):
-        await ctx.send(choice(filtered_responses))
+        await ctx.send(choice(FILTERED_RESPONSES))
         return
     uid = await queue_derf_message_processing(ctx, message)
     await process_derf_response(ctx, uid)

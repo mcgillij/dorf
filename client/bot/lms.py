@@ -3,11 +3,10 @@ import asyncio
 from typing import List, Dict
 
 from bot.tools.searxng_search import search_internet
-
+from bot.constants import MAX_PREDICTION_ROUNDS
 import logging
 
 logger = logging.getLogger(__name__)
-MAX_PREDICTION_ROUNDS = 10
 
 
 async def wrap_model_act(model, query, tools, on_message=None, callback=None) -> str:

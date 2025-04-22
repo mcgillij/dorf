@@ -8,24 +8,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-XP_DB = "xp_users.db"
-XP_COOLDOWN_SECONDS = 10  # 1 minute cooldown between XP gains per user
-
-LEVEL_THRESHOLDS = lambda lvl: 5 * (lvl**2) + 50 * lvl + 100
-
-LEVEL_ROLE_MAPPING = {
-    0: 1364048765727801344,  # Wanderer
-    5: 1364042278930219120,  # Noob
-    10: 1364042608757837965,  # Scrub
-    15: 1364045146521600041,  # Squire
-    20: 1364042802643865621,  # Knight
-    25: 1364043033036722276,  # Spellblade
-    30: 1364045512659046410,  # Berzerker
-    35: 1364045794180726825,  # Paladin
-    40: 1364043151475605655,  # Archmage
-    45: 1364043083590795397,  # Dragonlord
-    50: 1364043193003544690,  # Einherjar
-}
+from bot.constants import (
+    XP_DB,
+    XP_COOLDOWN_SECONDS,
+    LEVEL_THRESHOLDS,
+    LEVEL_ROLE_MAPPING,
+)
 
 
 async def send_fancy_levelup(destination, user, level, title, next_title=None):

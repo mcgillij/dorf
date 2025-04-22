@@ -5,23 +5,16 @@ import json
 import wave
 import time
 import threading
-from pydub import AudioSegment
-import discord
-from discord.ext.voice_recv import AudioSink, VoiceData
-import redis
-from dotenv import load_dotenv
 from typing import Dict
 import asyncio
 import logging
 
+from pydub import AudioSegment
+import discord
+from discord.ext.voice_recv import AudioSink, VoiceData
+from bot.redis_client import redis_client
+
 logger = logging.getLogger(__name__)
-
-load_dotenv()
-# Configure Redis
-REDIS_HOST = os.getenv("REDIS_HOST", "")
-REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
-
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 
 class RingBuffer:

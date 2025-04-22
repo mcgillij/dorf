@@ -2,21 +2,15 @@ import os
 import re
 import json
 from random import randint
-import redis
+import logging
 import asyncio  # Ensure you have this imported for running async code
-from dotenv import load_dotenv
 import aiohttp
 from db import SQLiteDB
-import logging
+from bot.redis_client import redis_client
+from bot.constants import WHISPER_QUEUE, VOICE_RESPONSE_QUEUE, VOICE_NIC_RESPONSE_QUEUE
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
-# Configure Redis
-REDIS_HOST = os.getenv("REDIS_HOST", "")
-REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
-
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 bot_name_pattern = re.compile(r"\b(bot|derf|derfbot|dorf|dwarf)\b", re.IGNORECASE)
 nic_bot_name_pattern = re.compile(r"\b(nic|nick|nicole|nikky|nik)\b", re.IGNORECASE)
@@ -24,12 +18,6 @@ nic_bot_name_pattern = re.compile(r"\b(nic|nick|nicole|nikky|nik)\b", re.IGNOREC
 # Initialize the database
 db = SQLiteDB()
 db.create_table()  # Create table if it doesn't exist
-
-
-# Redis queue names as constants
-WHISPER_QUEUE = "whisper_queue"
-VOICE_RESPONSE_QUEUE = "voice_response_queue"
-VOICE_NIC_RESPONSE_QUEUE = "voice_nic_response_queue"
 
 
 class WhisperClient:
@@ -65,7 +53,7 @@ class WhisperWorker:
     def process_audio(self):
         """Process audio paths from the Redis queue."""
         # Connect to Redis
-        logger.info(f"Connecting to Redis at {REDIS_HOST}:{REDIS_PORT}")
+        logger.info(f"Connecting to Redis")
         if not redis_client.ping():
             raise ConnectionError("Failed to connect to Redis.")
         logger.info("Connected to Redis successfully.")
@@ -137,8 +125,6 @@ class WhisperWorker:
                         logger.info("No text response received.")
                 except json.JSONDecodeError as e:
                     logger.info(f"Failed to decode JSON from Redis: {e}")
-            except redis.exceptions.TimeoutError:
-                logger.info("Redis queue timeout occurred.")
             except Exception as e:
                 logger.info(f"Exception during processing: {e}")
 

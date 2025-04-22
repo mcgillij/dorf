@@ -1,11 +1,8 @@
 from discord.ext import tasks
-import os
 import json
 import asyncio
-import redis
 import logging
-
-from dotenv import load_dotenv
+from bot.redis_client import redis_client
 
 from bot.utilities import split_message
 from bot.processing import (
@@ -14,17 +11,9 @@ from bot.processing import (
     process_derf_audio_queue,
     process_nic_audio_queue,
 )
+from bot.config import CHAT_CHANNEL_ID
 
 logger = logging.getLogger(__name__)
-
-load_dotenv()
-# Configure Redis
-REDIS_HOST = os.getenv("REDIS_HOST", "")
-REDIS_PORT = int(os.getenv("REDIS_PORT", ""))
-
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
-
-CHAT_CHANNEL_ID = int(os.getenv("CHAT_CHANNEL_ID", ""))
 
 
 async def process_response_queue(

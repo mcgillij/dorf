@@ -1,15 +1,12 @@
 import asyncio
-import redis
 import json
 import traceback
-
-from bot.utilities import replace_userids_with_username
 import logging
 
-logger = logging.getLogger(__name__)
+from bot.redis_client import redis_client
+from bot.utilities import replace_userids_with_username
 
-# Initialize Redis client
-redis_client = redis.Redis(host="0.0.0.0", port=6379, decode_responses=True)
+logger = logging.getLogger(__name__)
 
 
 async def process_response_queue(queue_name, response_key_prefix, bot):
