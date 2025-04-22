@@ -557,9 +557,6 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    if not message.content.startswith(bot.command_prefix):
-        return
-
     emojis = extract_emojis(message.content)
     if emojis:
         with sqlite3.connect(EMOJI_DB) as conn:
