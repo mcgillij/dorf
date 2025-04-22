@@ -4,7 +4,6 @@ import json
 import traceback
 
 from bot.utilities import replace_userids_with_username
-from bot.client import derf_bot, nic_bot
 import logging
 
 logger = logging.getLogger(__name__)
@@ -41,9 +40,9 @@ async def process_response_queue(queue_name, response_key_prefix, bot):
             traceback.print_exc()
 
 
-async def process_derf_response_queue():
-    await process_response_queue("response_queue", "response", derf_bot.llm)
+async def process_derf_response_queue(bot):
+    await process_response_queue("response_queue", "response", bot.llm)
 
 
-async def process_nic_response_queue():
-    await process_response_queue("response_nic_queue", "response_nic", nic_bot.llm)
+async def process_nic_response_queue(bot):
+    await process_response_queue("response_nic_queue", "response_nic", bot.llm)

@@ -4,6 +4,7 @@ import asyncio
 from collections import defaultdict
 import sqlite3
 import re
+import logging
 
 import dice
 import emoji
@@ -13,18 +14,13 @@ from discord.ext.voice_recv import VoiceRecvClient
 
 from dotenv import load_dotenv
 from bot.poll import PollView, active_polls
-
 from bot.processing import (
     queue_derf_message_processing,
     queue_nic_message_processing,
     process_derf_response,
     process_nic_response,
 )
-
 from bot.utilities import filtered_responses, filter_message, split_message
-
-import logging
-
 from bot.lms import (
     search_with_tool,
 )
@@ -32,6 +28,8 @@ from bot.utilities import LLMClient
 from bot.audio_capture import RingBufferAudioSink
 
 from bot.quotes import addquote, listquotes, quote, deletequote, searchquote
+
+logger = logging.getLogger(__name__)
 
 CUSTOM_EMOJI_REGEX = re.compile(r"<a?:\w+:\d+>")
 EMOJI_DB = "emojis.db"
@@ -67,7 +65,6 @@ NIC_WORKSPACE = "nic"
 SESSION_ID = "my-session-id"
 NIC_SESSION_ID = "my-session-id"
 
-logger = logging.getLogger(__name__)
 
 # Configure bot and intents
 INTENTS = discord.Intents.default()
@@ -471,7 +468,8 @@ async def start_capture(guild, channel, bot):
         logger.error(f"Error in start_capture: {e}")
 
 
-async def connect_to_voice(b):
+async def connect_to_voice(bot):
+    logger.info(f"BOT STARTING in connect_to_voice: {bot}")
     try:
         guild_id = int(os.getenv("GUILD_ID", ""))
         voice_channel_id = int(os.getenv("VOICE_CHANNEL_ID", ""))
@@ -484,7 +482,7 @@ async def connect_to_voice(b):
             "GUILD_ID or VOICE_CHANNEL_ID is missing in the environment variables."
         )
         return
-    guild = discord.utils.get(b.guilds, id=guild_id)
+    guild = discord.utils.get(bot.guilds, id=guild_id)
 
     if not guild:
         logger.error("Guild not found.")
@@ -496,7 +494,7 @@ async def connect_to_voice(b):
         return
 
     # Check existing connections in the guild
-    current_vc = next((vc for vc in b.voice_clients if vc.guild == guild), None)
+    current_vc = next((vc for vc in bot.voice_clients if vc.guild == guild), None)
 
     try:
         if not current_vc:

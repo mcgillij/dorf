@@ -8,7 +8,6 @@ import logging
 from dotenv import load_dotenv
 
 from bot.utilities import split_message
-from bot.client import derf_bot, nic_bot
 from bot.processing import (
     poll_redis_for_key,
     LONG_RESPONSE_THRESHOLD,
@@ -109,22 +108,22 @@ async def process_response_queue(
 
 
 @tasks.loop(seconds=1)
-async def monitor_nic_response_queue():
+async def monitor_nic_response_queue(bot):
     """Monitor the Redis voice response queue for Nic."""
     await process_response_queue(
         "voice_nic_response_queue",
-        nic_bot,
+        bot,
         process_nic_audio_queue,
         "summarizer_nic_queue",
     )
 
 
 @tasks.loop(seconds=1)
-async def monitor_derf_response_queue():
+async def monitor_derf_response_queue(bot):
     """Monitor the Redis voice response queue."""
     await process_response_queue(
         "voice_response_queue",
-        derf_bot,
+        bot,
         process_derf_audio_queue,
         "summarizer_queue",
     )

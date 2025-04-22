@@ -2,7 +2,6 @@ import os
 import tempfile
 import asyncio
 from pydub import AudioSegment
-from bot.client import derf_bot, nic_bot
 from bot.processing import redis_client
 from bot.utilities import replace_userids_with_username
 import logging
@@ -97,19 +96,19 @@ async def audio_task(queue_name, playback_queue_name, tts_voice, bot_instance):
             )
 
 
-async def nic_audio_task():
+async def nic_audio_task(bot):
     await audio_task(
         queue_name="audio_nic_queue",
         playback_queue_name="playback_nic_queue",
         tts_voice=TTS_VOICE_NICOLE,
-        bot_instance=nic_bot,
+        bot_instance=bot,
     )
 
 
-async def derf_audio_task():
+async def derf_audio_task(bot):
     await audio_task(
         queue_name="audio_queue",
         playback_queue_name="playback_queue",
         tts_voice=TTS_VOICE,
-        bot_instance=derf_bot,
+        bot_instance=bot,
     )

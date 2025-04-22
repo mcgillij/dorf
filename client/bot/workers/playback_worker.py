@@ -2,7 +2,6 @@ import asyncio
 import redis
 import os
 import discord
-from bot.client import derf_bot, nic_bot
 from dotenv import load_dotenv
 import logging
 
@@ -77,15 +76,15 @@ async def playback_task(bot_instance, queue_name, voice_channel_id):
             await asyncio.sleep(1)  # Avoid spamming on continuous errors
 
 
-async def playback_derf_task():
+async def playback_derf_task(bot):
     """
     Wrapper for the playback task for the main bot.
     """
-    await playback_task(derf_bot, "playback_queue", VOICE_CHANNEL_ID)
+    await playback_task(bot, "playback_queue", VOICE_CHANNEL_ID)
 
 
-async def playback_nic_task():
+async def playback_nic_task(bot):
     """
     Wrapper for the playback task for the nic_bot.
     """
-    await playback_task(nic_bot, "playback_nic_queue", VOICE_CHANNEL_ID)
+    await playback_task(bot, "playback_nic_queue", VOICE_CHANNEL_ID)

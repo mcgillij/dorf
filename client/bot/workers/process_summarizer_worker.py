@@ -2,7 +2,6 @@ import asyncio
 import redis
 import json
 import traceback
-from bot.client import derf_bot, nic_bot
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,15 +35,15 @@ async def process_queue(queue_name, bot, response_key_prefix):
             traceback.print_exc()
 
 
-async def process_derf_summarizer_queue():
+async def process_derf_summarizer_queue(bot):
     """
     Wrapper for processing the summarizer queue using derf_bot.
     """
-    await process_queue("summarizer_queue", derf_bot.llm, "summarizer")
+    await process_queue("summarizer_queue", bot.llm, "summarizer")
 
 
-async def process_nic_summarizer_queue():
+async def process_nic_summarizer_queue(bot):
     """
     Wrapper for processing the nic_summarizer queue using nicole_bot.
     """
-    await process_queue("nic_summarizer_queue", nic_bot.llm, "summarizer")
+    await process_queue("nic_summarizer_queue", bot.llm, "summarizer")
