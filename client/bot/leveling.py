@@ -2,13 +2,14 @@ import discord
 from discord.ext import commands, tasks
 import sqlite3
 import datetime
+import random
 
 import logging
 
 logger = logging.getLogger(__name__)
 
 XP_DB = "xp_users.db"
-XP_COOLDOWN_SECONDS = 1  # 1 minute cooldown between XP gains per user
+XP_COOLDOWN_SECONDS = 10  # 1 minute cooldown between XP gains per user
 
 LEVEL_THRESHOLDS = lambda lvl: 5 * (lvl**2) + 50 * lvl + 100
 
@@ -25,6 +26,43 @@ LEVEL_ROLE_MAPPING = {
     45: 1364043083590795397,  # Dragonlord
     50: 1364043193003544690,  # Einherjar
 }
+
+
+async def send_fancy_levelup(destination, user, level, title, next_title=None):
+    phrases = [
+        "has ascended!",
+        "leveled up!",
+        "evolved!",
+        "unlocked a new path!",
+        "awakened!",
+        "powered up!",
+        "achieved greatness!",
+        "grew stronger!",
+    ]
+    random_phrase = random.choice(phrases)
+
+    embed = discord.Embed(
+        title=f"🌟 {user.display_name} {random_phrase}",
+        description=f"🆙 Reached **Level {level}**!",
+        color=discord.Color.from_rgb(255, 215, 0),  # Gold color
+    )
+    embed.add_field(name="New Title", value=f"🎖️ {title}", inline=False)
+
+    if next_title:
+        embed.add_field(
+            name="Next Title",
+            value=f"🔜 {next_title} at Level {level + 1}",
+            inline=False,
+        )
+
+    if user.avatar:
+        embed.set_thumbnail(url=user.avatar.url)
+    else:
+        embed.set_thumbnail(url=user.default_avatar.url)
+
+    embed.set_footer(text="Keep chatting to grow stronger! 🚀")
+
+    await destination.send(embed=embed)
 
 
 def get_current_timestamp():
@@ -101,7 +139,7 @@ class Leveling(commands.Cog):
             except (discord.Forbidden, discord.HTTPException) as e:
                 logger.error(f"Failed to assign roles for {member.display_name}: {e}")
 
-    async def add_xp(self, user_id, amount, guild=None):
+    async def add_xp(self, user_id, amount, guild=None, channel=None):
         with sqlite3.connect(XP_DB) as conn:
             c = conn.cursor()
 
@@ -139,15 +177,22 @@ class Leveling(commands.Cog):
                         try:
                             member = await guild.fetch_member(user_id)
                         except discord.NotFound:
-                            logger.warning(f"Member {user_id} not found in guild {guild.name}")
+                            logger.warning(
+                                f"Member {user_id} not found in guild {guild.name}"
+                            )
                             return
 
                     await self.check_and_assign_roles(member, new_level)
 
                     # OPTIONAL: send a public level up message!
                     if member.guild.system_channel:  # Check it exists
-                        await member.guild.system_channel.send(
-                            f"🎉 {member.mention} leveled up to **{new_level}** and became a **{self.get_title_for_level(new_level)}**!"
+                        # f"🎉 {member.mention} leveled up to **{new_level}** and became a **{self.get_title_for_level(new_level)}**!"
+                        await send_fancy_levelup(
+                            member.guild.system_channel,
+                            member,
+                            new_level,
+                            self.get_title_for_level(old_level),
+                            self.get_title_for_level(new_level),
                         )
 
             else:
@@ -170,13 +215,17 @@ class Leveling(commands.Cog):
     async def on_message(self, message):
         if message.author.bot:
             return
-        await self.add_xp(message.author.id, 10, guild=message.guild)
+        await self.add_xp(
+            message.author.id, 10, guild=message.guild, channel=message.channel
+        )
 
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction, user):
         if user.bot:
             return
-        await self.add_xp(user.id, 5, guild=reaction.message.guild)
+        await self.add_xp(
+            user.id, 5, guild=reaction.message.guild, channel=reaction.message.channel
+        )
 
     @commands.command(name="profile")
     async def profile(self, ctx, user: discord.User = None):
@@ -196,13 +245,92 @@ class Leveling(commands.Cog):
         next_level_xp = LEVEL_THRESHOLDS(level)
         title = self.get_title_for_level(level)
 
-        embed = discord.Embed(
-            title=f"{user.display_name}'s Adventurer Profile",
-            color=discord.Color.blurple(),
+        xp_bar, percent = create_progress_bar(xp, next_level_xp)
+
+        color = (
+            discord.Color.gold()
+            if level >= 40
+            else discord.Color.blurple() if level >= 20 else discord.Color.greyple()
         )
-        embed.add_field(name="Level", value=str(level))
-        embed.add_field(name="XP", value=f"{xp} / {next_level_xp}")
-        embed.add_field(name="Title", value=title)
+
+        embed = discord.Embed(
+            title=f"✨ {user.display_name}'s Adventurer Profile",
+            color=color,
+        )
+        embed.add_field(name="Level", value=f"{level}", inline=True)
+        embed.add_field(name="XP", value=f"{xp} / {next_level_xp}", inline=True)
+        embed.add_field(name="Progress", value=f"{xp_bar} {percent}%", inline=False)
+        embed.add_field(name="Title", value=f"**{title}**", inline=True)
+        embed.add_field(name="Prestige", value=f"{prestige}", inline=True)
+        embed.add_field(
+            name="Next Level In", value=f"{next_level_xp - xp} XP", inline=True
+        )
+        embed.set_thumbnail(
+            url=user.avatar.url if user.avatar else user.default_avatar.url
+        )
         embed.set_footer(text="Earn XP by chatting and reacting!")
 
         await ctx.send(embed=embed)
+
+    @commands.command(name="rank")
+    async def rank(self, ctx, user: discord.User = None):
+        user = user or ctx.author
+        with sqlite3.connect(XP_DB) as conn:
+            c = conn.cursor()
+            c.execute("SELECT user_id, xp FROM user_xp ORDER BY xp DESC")
+            rows = c.fetchall()
+
+        user_ids = [row[0] for row in rows]
+        if user.id not in user_ids:
+            await ctx.send(f"{user.display_name} hasn't earned any XP yet!")
+            return
+
+        rank = user_ids.index(user.id) + 1
+
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        medal = medals.get(rank, "🎖️")
+
+        await ctx.send(
+            f"{medal} {user.display_name} is ranked **#{rank}** out of {len(user_ids)} adventurers!"
+        )
+
+    @commands.command(name="leaderboard", aliases=["lb"])
+    async def leaderboard(self, ctx, limit: int = 10):
+        limit = max(1, min(limit, 20))  # Don't allow huge requests
+        with sqlite3.connect(XP_DB) as conn:
+            c = conn.cursor()
+            c.execute(
+                "SELECT user_id, xp, level FROM user_xp ORDER BY xp DESC LIMIT ?",
+                (limit,),
+            )
+            rows = c.fetchall()
+
+        if not rows:
+            await ctx.send("No adventurers found on the leaderboard yet!")
+            return
+
+        medals = ["🥇", "🥈", "🥉"]
+        description = ""
+        for idx, (user_id, xp, level) in enumerate(rows, start=1):
+            user = await self.bot.fetch_user(user_id)
+            title = self.get_title_for_level(level)
+            medal = medals[idx - 1] if idx <= 3 else "🎖️"
+
+            description += f"{medal} **{idx}. {user.display_name}** — Level {level} ({title}) — {xp} XP\n"
+
+        embed = discord.Embed(
+            title="🏆 Server Leaderboard",
+            description=description,
+            color=discord.Color.blue(),
+        )
+        embed.set_footer(text="Top adventurers based on total XP!")
+        await ctx.send(embed=embed)
+
+
+def create_progress_bar(current, total, length=10, filled_emoji="🟦", empty_emoji="⬜"):
+    progress = current / total
+    filled_blocks = int(progress * length)
+    empty_blocks = length - filled_blocks
+    return filled_emoji * filled_blocks + empty_emoji * empty_blocks, int(
+        progress * 100
+    )
