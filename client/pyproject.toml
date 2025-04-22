@@ -23,6 +23,7 @@ lmstudio = "^1.2.0"
 dice = "^4.0.0"
 torch = {version = "^2.6.0", source = "rocm_torch"}
 pytorch-triton-rocm = {version = "^3.2.0", source = "rocm_torch"}
+emoji = "^2.14.1"
 
 
 [tool.poetry.group.dev.dependencies]

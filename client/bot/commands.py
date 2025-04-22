@@ -1,14 +1,18 @@
 import os
 from random import choice
 import asyncio
-import dice
+from collections import defaultdict
+import sqlite3
+import re
 
+import dice
+import emoji
 import discord
 from discord.ext import commands
 from discord.ext.voice_recv import VoiceRecvClient
 
 from dotenv import load_dotenv
-from bot.poll import PollView
+from bot.poll import PollView, active_polls
 
 from bot.processing import (
     queue_derf_message_processing,
@@ -26,6 +30,29 @@ from bot.lms import (
 )
 from bot.utilities import LLMClient
 from bot.audio_capture import RingBufferAudioSink
+
+from bot.quotes import addquote, listquotes, quote, deletequote, searchquote
+
+CUSTOM_EMOJI_REGEX = re.compile(r"<a?:\w+:\d+>")
+EMOJI_DB = "emojis.db"
+
+conn = sqlite3.connect(EMOJI_DB)
+c = conn.cursor()
+
+# Ensure quotes table exists
+c.execute(
+    """
+    CREATE TABLE IF NOT EXISTS emoji_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    emoji TEXT NOT NULL,
+    usage_count INTEGER DEFAULT 1,
+    last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, emoji)
+);
+"""
+)
+conn.commit()
 
 load_dotenv()
 
@@ -138,17 +165,61 @@ async def derf(ctx, *, message: str):
     await process_derf_response(ctx, uid)
 
 
-@commands.command(name="poll", aliases=["p"])  # Command name is !poll, alias !p
+@commands.command(name="poll", aliases=["p"])
 async def poll(ctx, *, question: str):
-    """Create a simple Yes/No poll."""
+    """Create a poll that automatically ends after 5 minutes."""
+    poll_id = str(ctx.message.id)
+    active_polls[poll_id] = {
+        "question": question,
+        "yes": 0,
+        "no": 0,
+        "channel_id": ctx.channel.id,
+        "message_id": None,
+    }
+
     embed = discord.Embed(
-        title="📊 New Poll!", description=question, color=discord.Color.blue()
+        title="📊 New Poll!",
+        description=f"{question}\n\n*Poll ends in 5 minutes!*",
+        color=discord.Color.blue(),
     )
-    view = PollView()
-    await ctx.send(embed=embed, view=view)
+    view = PollView(poll_id)
+    message = await ctx.send(embed=embed, view=view)
+
+    active_polls[poll_id]["message_id"] = message.id
+
+    # Start background task
+    bot.loop.create_task(close_poll_after_delay(poll_id, view))
 
 
-@commands.command(name="roll", aliases=["r"])  # Command name is !roll, alias !r
+async def close_poll_after_delay(poll_id, view):
+    await asyncio.sleep(300)  # 5 minutes
+    view.close_poll()
+
+    poll = active_polls.get(poll_id)
+    if not poll:
+        return
+
+    channel = bot.get_channel(poll["channel_id"])
+    if not channel:
+        return
+
+    try:
+        message = await channel.fetch_message(poll["message_id"])
+    except discord.NotFound:
+        return
+
+    # Update the embed to show "Poll Ended"
+    embed = discord.Embed(
+        title="📋 Poll Ended!",
+        description=f"**{poll['question']}**\n\n👍 Yes: {poll['yes']}\n👎 No: {poll['no']}",
+        color=discord.Color.gold(),
+    )
+    await message.edit(embed=embed, view=view)
+
+    # Clean up
+    active_polls.pop(poll_id, None)
+
+
 async def roll_dice(ctx, *, dice_notation: str):
     """Rolls dice using standard dice notation (e.g., !roll d20, !r 2d8+4)."""
 
@@ -227,14 +298,27 @@ class DerfBot(BaseBot):
     def __init__(self, *args, **kwargs):
         super().__init__(name="derfbot", prefix="!", *args, **kwargs)
         self.add_command(search)
-        self.add_command(roll_dice)
         logger.info("attaching derf command")
+        self.add_command(commands.Command(roll_dice, name="roll", aliases=["r"]))
         self.add_command(derf)
         self.add_command(spack)
         self.add_command(frieren)
         self.add_command(poll)
         self.add_command(marne)
+        self.add_command(quote)
+        self.add_command(addquote)
+        self.add_command(listquotes)
+        self.add_command(searchquote)
+        self.add_command(deletequote)
+        self.add_command(
+            commands.Command(emojistats, name="emojistats", aliases=["es"])
+        )
+        self.add_command(
+            commands.Command(emoji_leaderboard, name="emojileaderboard", aliases=["el"])
+        )
         self.add_listener(self.on_voice_state_update)
+        self.add_listener(on_message)
+        self.add_listener(on_reaction_add)
         self.llm = LLMClient(AUTH_TOKEN, WORKSPACE, SESSION_ID)
 
     async def handle_voice_state_update(self, member, before, after):
@@ -274,6 +358,71 @@ class DerfBot(BaseBot):
             )
             if voice_channel:
                 await start_capture(guild, voice_channel, self)
+
+
+async def emoji_leaderboard(ctx, top_n: int = 10):
+    with sqlite3.connect(EMOJI_DB) as conn:
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT user_id, emoji, SUM(usage_count) as total_usage
+            FROM emoji_usage
+            GROUP BY user_id, emoji
+            ORDER BY total_usage DESC
+            LIMIT ?
+        """,
+            (top_n,),
+        )
+        rows = c.fetchall()
+
+    if not rows:
+        await ctx.send("No emoji data yet! 😢")
+        return
+
+    # Build user stats
+    user_emoji_stats = defaultdict(list)
+    for user_id, emoji_used, count in rows:
+        user_emoji_stats[user_id].append((emoji_used, count))
+
+    # Fetch usernames
+    leaderboard_entries = []
+    for user_id, emoji_stats in user_emoji_stats.items():
+        user = await bot.fetch_user(user_id)
+        username = user.display_name if user else f"User {user_id}"
+
+        total_user_usage = sum(count for _, count in emoji_stats)
+        top_emojis = sorted(emoji_stats, key=lambda x: -x[1])[:3]
+
+        emojis_display = " ".join(f"{emj}({cnt})" for emj, cnt in top_emojis)
+
+        leaderboard_entries.append((username, total_user_usage, emojis_display))
+
+    # Sort leaderboard
+    leaderboard_entries.sort(key=lambda x: -x[1])
+
+    # Build fancy text
+    medal_emojis = ["🥇", "🥈", "🥉"]
+    response_lines = []
+    total_all_usage = sum(entry[1] for entry in leaderboard_entries)
+
+    for idx, (username, total_usage, emojis_display) in enumerate(leaderboard_entries):
+        medal = medal_emojis[idx] if idx < 3 else f"`#{idx+1}`"
+
+        # Bar graph
+        percentage = (total_usage / total_all_usage) * 100 if total_all_usage else 0
+        bars = "█" * int(percentage // 5)
+
+        line = f"{medal} **{username}** - {total_usage} uses | {bars} {percentage:.1f}%\nTop: {emojis_display}"
+        response_lines.append(line)
+
+    embed = discord.Embed(
+        title="🏆 Emoji Leaderboard",
+        description="\n\n".join(response_lines),
+        color=discord.Color.gold(),
+    )
+    embed.set_footer(text="Tracking all emoji usage across chat and reactions!")
+
+    await ctx.send(embed=embed)
 
 
 async def start_capture(guild, channel, bot):
@@ -386,6 +535,92 @@ def get_random_image_path(directory):
     except Exception as e:
         print(f"An error occurred: {e}")  # Catch other potential errors
         return None
+
+
+def extract_emojis(text):
+    found = []
+
+    # 1. Find unicode emojis
+    for character in text:
+        if emoji.is_emoji(character):
+            found.append(character)
+
+    # 2. Find custom emojis
+    custom_matches = CUSTOM_EMOJI_REGEX.findall(text)
+    for match in custom_matches:
+        found.append(match)
+
+    return found
+
+
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    if not message.content.startswith(bot.command_prefix):
+        return
+
+    emojis = extract_emojis(message.content)
+    if emojis:
+        with sqlite3.connect(EMOJI_DB) as conn:
+            c = conn.cursor()
+            for em in emojis:
+                c.execute(
+                    """
+                    INSERT INTO emoji_usage (user_id, emoji, usage_count)
+                    VALUES (?, ?, 1)
+                    ON CONFLICT(user_id, emoji)
+                    DO UPDATE SET usage_count = usage_count + 1, last_used = CURRENT_TIMESTAMP
+                """,
+                    (message.author.id, em),
+                )
+            conn.commit()
+    # await bot.process_commands(message)  # important to not block commands
+
+
+async def on_reaction_add(reaction, user):
+    if user.bot:
+        return
+
+    # Get the emoji as a string
+    emoji_used = str(reaction.emoji)
+
+    with sqlite3.connect(EMOJI_DB) as conn:
+        c = conn.cursor()
+        c.execute(
+            """
+            INSERT INTO emoji_usage (user_id, emoji, usage_count)
+            VALUES (?, ?, 1)
+            ON CONFLICT(user_id, emoji)
+            DO UPDATE SET usage_count = usage_count + 1, last_used = CURRENT_TIMESTAMP
+        """,
+            (user.id, emoji_used),
+        )
+        conn.commit()
+
+
+async def emojistats(ctx, user: discord.User = None):
+    """Show emoji usage stats for a user (or yourself)."""
+    user = user or ctx.author
+    with sqlite3.connect(EMOJI_DB) as conn:
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT emoji, usage_count FROM emoji_usage
+            WHERE user_id = ?
+            ORDER BY usage_count DESC
+            LIMIT 10
+        """,
+            (user.id,),
+        )
+        results = c.fetchall()
+
+    if not results:
+        await ctx.send(f"{user.display_name} hasn't used any emojis yet!")
+        return
+
+    stats = "\n".join([f"{emoji} — {count} times" for emoji, count in results])
+    await ctx.send(f"**Top emojis for {user.display_name}:**\n{stats}")
 
 
 # instantiate my bots here temporarily, need to refactor this
