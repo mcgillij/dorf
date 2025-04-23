@@ -25,6 +25,12 @@ class Adventure(commands.Cog):
 
     @commands.command()
     async def adventure(self, ctx):
+        leveling_cog = self.bot.get_cog("Leveling")
+        if leveling_cog:
+            user_stats = await leveling_cog.get_user_stats(ctx)
+        else:
+            user_stats = f"{ctx.author} the Adventurer"
+
         if ctx.author.id in self.active_quests:
             await ctx.send("You're already on an adventure!")
             return
@@ -32,9 +38,10 @@ class Adventure(commands.Cog):
         self.active_quests[ctx.author.id] = {"wins": 0, "losses": 0}
 
         chat = Chat(
-            "You are an adventuring bard guiding the user on a quest. "
+            f"You are a retired adventuring bard guiding the user:'{user_stats}' on a heroic quest. "
             "The user will always respond with: Run away, Stealth, or Fight. "
             "Present challenges that fit these choices."
+            "Do not list choices, just describe the scene/situation"
         )
         chat.add_user_message("I want to go on an adventure!")
 
@@ -55,7 +62,7 @@ class Adventure(commands.Cog):
 
             try:
                 reaction, user = await self.bot.wait_for(
-                    "reaction_add", timeout=60.0, check=check
+                    "reaction_add", timeout=120.0, check=check
                 )
             except asyncio.TimeoutError:
                 await ctx.send("You hesitated too long... the opportunity vanished.")
@@ -66,7 +73,7 @@ class Adventure(commands.Cog):
             choice_map = {"🏃‍♂️": "Run away", "🥷": "Stealth", "⚔️": "Fight"}
             choice = choice_map[str(reaction.emoji)]
 
-            await ctx.send(f"You chose to **{choice}**! Rolling for success... 🎲")
+            await ctx.send(f"You chose to **{choice}**! Rolling the dice... 🎲🎲")
 
             # Determine success/failure chances
             success_chance = {
@@ -82,7 +89,7 @@ class Adventure(commands.Cog):
             # Update history
             if passed:
                 chat.add_user_message(f"I choose to {choice} and I succeed!")
-                outcome_text = "**Success!** 🎉 You overcame the challenge!"
+                outcome_text = "**Success!** 🎉 overcame the challenge!"
                 self.active_quests[ctx.author.id]["wins"] += 1
             else:
                 chat.add_user_message(f"I choose to {choice} but I fail...")
@@ -100,21 +107,23 @@ class Adventure(commands.Cog):
                 # Create a fresh summarizing chat
                 summary_chat = Chat(
                     "You are a bard who summarizes completed adventures. "
-                    "Create a short, satisfying ending for the user's quest without offering any new choices."
+                    f"Create a short, satisfying ending for the {user_stats} quest without offering any new choices."
                 )
 
                 if wins >= 3:
                     summary_chat.add_user_message(
-                        "The user completed their adventure with 3 victories."
+                        f"The {user_stats} completed their adventure with 3 victories."
                     )
                     xp_earned = random.randint(100, 150)
-                    end_text = f"🏆 **Victory!** You conquered your adventure with {wins} successes!"
+                    end_text = f"🏆 **Victory!** {user_stats} conquered your adventure with {wins} successes!"
                 else:
                     summary_chat.add_user_message(
-                        "The user failed their adventure after 3 defeats."
+                        f"The {user_stats} failed their adventure after 3 defeats."
                     )
                     xp_earned = random.randint(30, 50)
-                    end_text = f"💀 **Defeat!** You fell after {losses} failures."
+                    end_text = (
+                        f"💀 **Defeat!** {user_stats} fell after {losses} failures."
+                    )
 
                 # Get final story
                 final_story = self.model.respond(summary_chat)
@@ -123,7 +132,6 @@ class Adventure(commands.Cog):
                 await ctx.send(final_story)
 
                 # Award XP
-                leveling_cog = self.bot.get_cog("Leveling")
                 if leveling_cog:
                     await leveling_cog.add_xp(ctx.author.id, xp_earned)
 

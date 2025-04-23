@@ -113,6 +113,26 @@ class Leveling(commands.Cog):
             except (discord.Forbidden, discord.HTTPException) as e:
                 logger.error(f"Failed to assign roles for {member.display_name}: {e}")
 
+    async def get_user_stats(self, ctx, guild=None, channel=None):
+        user_id = ctx.author.id
+        with sqlite3.connect(XP_DB) as conn:
+            c = conn.cursor()
+
+            # Fetch current XP
+            c.execute(
+                "SELECT level, prestige FROM user_xp WHERE user_id = ?",
+                (user_id,),
+            )
+            row = c.fetchone()
+
+            if row:
+                level, prestige = row
+                user = ctx.author
+                title = get_title_for_level(level)
+                flair = get_prestige_flair(prestige)
+                prestige_title = get_prestige_title(prestige)
+                return f"{flair}{user} the level {level}{flair} ***{prestige_title}*** {title}"
+
     async def add_xp(self, user_id, amount, guild=None, channel=None):
         with sqlite3.connect(XP_DB) as conn:
             c = conn.cursor()
