@@ -1,3 +1,5 @@
+from bot.config import WHEREAMI
+
 # Define constants for queue names
 DERF_RESPONSE_QUEUE = "voice_response_queue"
 DERF_RESPONSE_KEY_PREFIX = "response_queue"
@@ -24,8 +26,14 @@ MAX_PREDICTION_ROUNDS = 10
 LONG_RESPONSE_THRESHOLD = 1000
 # Commands
 EMOJI_DB = "emojis.db"
-WORKSPACE = "birthright"
-# WORKSPACE = "a-new-workspace"  # used on my server
+
+# temporary conditional based on my local env
+WORKSPACE = ""
+if WHEREAMI == "server":
+    WORKSPACE = "birthright"
+else:
+    WORKSPACE = "a-new-workspace"  # used on my desktop
+
 NIC_WORKSPACE = "nic"
 SESSION_ID = "my-session-id"
 NIC_SESSION_ID = "my-session-id"
