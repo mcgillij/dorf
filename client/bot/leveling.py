@@ -131,7 +131,10 @@ class Leveling(commands.Cog):
                 title = get_title_for_level(level)
                 flair = get_prestige_flair(prestige)
                 prestige_title = get_prestige_title(prestige)
-                return f"{flair}{user} the level {level}{flair} ***{prestige_title}*** {title}"
+                bold_prestige_title = (
+                    f"{flair}***{prestige_title}*** " if prestige_title else ""
+                )
+                return f"**{user}** the level {level} ({bold_prestige_title} {title} {flair})"
 
     async def add_xp(self, user_id, amount, guild=None, channel=None):
         with sqlite3.connect(XP_DB) as conn:
@@ -331,7 +334,7 @@ class Leveling(commands.Cog):
             )
             medal = medals[idx - 1] if idx <= 3 else "🎖️"
 
-            description += f"{medal} **{idx}. {user.display_name} {flair}** — Level {level} ({bold_prestige_title}{title}) — {xp} XP\n"
+            description += f"{medal} **{idx}. {user.display_name} ** — Level {level} ({bold_prestige_title}{title}{flair}) — {xp} XP\n"
 
         embed = discord.Embed(
             title="🏆 Server Leaderboard",
