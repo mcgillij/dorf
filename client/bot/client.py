@@ -46,6 +46,8 @@ async def setup_bot(
 async def derfbot_ready():
     await derf_bot.load_extension("bot.leveling")
     await derf_bot.load_extension("bot.adventure")
+    await derf_bot.load_extension("bot.quotes")
+    await derf_bot.load_extension("bot.emoji")
     await setup_bot(
         bot_instance=derf_bot,
         name="DerfBot",
