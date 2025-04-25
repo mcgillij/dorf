@@ -52,6 +52,8 @@ async def derfbot_ready():
     await derf_bot.load_extension("bot.poll")
     await derf_bot.load_extension("bot.misc")
     await derf_bot.load_extension("bot.search")
+    await derf_bot.load_extension("bot.macro")
+    await derf_bot.load_extension("bot.faction")
     await setup_bot(
         bot_instance=derf_bot,
         name="DerfBot",

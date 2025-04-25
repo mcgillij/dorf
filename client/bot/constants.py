@@ -26,6 +26,15 @@ MAX_PREDICTION_ROUNDS = 10
 LONG_RESPONSE_THRESHOLD = 1000
 # Commands
 EMOJI_DB = "emojis.db"
+MACRO_DB = "macros.db"
+FACTION_DB = "faction_data.db"
+
+# factions
+DEFAULT_FACTIONS = [
+    {"name": "Atiyas", "symbol": "🐺", "color": "#FFA500"},
+    {"name": "Rosies", "symbol": "🐕", "color": "#87CEFA"},
+    {"name": "Booms", "symbol": "🐩", "color": "#8A2BE2"},
+]
 
 # temporary conditional based on my local env
 WORKSPACE = ""
