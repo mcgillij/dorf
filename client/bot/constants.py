@@ -28,6 +28,7 @@ LONG_RESPONSE_THRESHOLD = 1000
 EMOJI_DB = "emojis.db"
 MACRO_DB = "macros.db"
 FACTION_DB = "faction_data.db"
+METRICS_DB = "metrics.db"
 
 # factions
 DEFAULT_FACTIONS = [

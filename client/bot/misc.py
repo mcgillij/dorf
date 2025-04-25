@@ -76,7 +76,6 @@ class MiscCog(commands.Cog):
             # The dice library handles parsing the notation string
             result = dice.roll(clean_notation)
 
-            # Format the result message (similar to your on_message logic)
             result_message = ""
             if isinstance(result, (int, float)):
                 result_message = f"**{result}**"
