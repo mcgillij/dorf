@@ -15,6 +15,7 @@ from bot.constants import (
     LEVEL_THRESHOLDS,
     LEVEL_ROLE_MAPPING,
 )
+from bot.config import CHAT_CHANNEL_ID
 
 
 async def send_fancy_levelup(destination, user, level, new_title=None, next_title=None):
@@ -184,19 +185,20 @@ class Leveling(commands.Cog):
 
                     await self.check_and_assign_roles(member, new_level)
 
-                    # OPTIONAL: send a public level up message!
-                    if member.guild.system_channel:  # Check it exists
-                        old_title = get_title_for_level(old_level)
-                        new_title = get_title_for_level(new_level)
-                        # only show title if it changed
-                        title_changed = old_title != new_title
-                        await send_fancy_levelup(
-                            member.guild.system_channel,
-                            member,
-                            new_level,
-                            new_title if title_changed else None,
-                            next_title=get_title_for_level(new_level + 1),
-                        )
+                    channel = self.bot.get_channel(CHAT_CHANNEL_ID)
+                    if not channel:
+                        channel = member.guild.system_channel
+                    old_title = get_title_for_level(old_level)
+                    new_title = get_title_for_level(new_level)
+                    # only show title if it changed
+                    title_changed = old_title != new_title
+                    await send_fancy_levelup(
+                        channel,
+                        member,
+                        new_level,
+                        new_title if title_changed else None,
+                        next_title=get_title_for_level(new_level + 1),
+                    )
 
             else:
                 xp = amount

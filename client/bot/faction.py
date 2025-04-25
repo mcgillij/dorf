@@ -338,6 +338,7 @@ class FactionCog(commands.Cog):
 
     @tasks.loop(minutes=5)
     async def check_war_end(self):
+        logger.debug("Checking if the emoji war should end.")
         with sqlite3.connect(FACTION_DB) as conn:
             c = conn.cursor()
             c.execute("SELECT started_at FROM war_state WHERE id = 1")
