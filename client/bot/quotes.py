@@ -67,10 +67,12 @@ class QuoteCog(commands.Cog):
         if arg is None:
             # Fetch random quote
             c.execute(
-                "SELECT id, author, quote_text FROM quotes ORDER BY RANDOM() LIMIT 1"
+                "SELECT id, author, quote_text, source FROM quotes ORDER BY RANDOM() LIMIT 1"
             )
         elif arg.isdigit():
-            c.execute("SELECT id, author, quote_text FROM quotes WHERE id = ?", (arg,))
+            c.execute(
+                "SELECT id, author, quote_text, source FROM quotes WHERE id = ?", (arg,)
+            )
         else:
             # Search quotes by keyword
             c.execute(
@@ -80,8 +82,10 @@ class QuoteCog(commands.Cog):
 
         result = c.fetchone()
         if result:
-            id, author, quote_text = result
-            await ctx.send(f"**#{id}** {author+': ' if author else ''}{quote_text}")
+            id, author, quote_text, source = result
+            await ctx.send(
+                f"**#{id}** {author+': ' if author else ''}{quote_text} - {source}"
+            )
         else:
             await ctx.send("Quote not found!")
 

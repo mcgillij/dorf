@@ -3,7 +3,8 @@ import logging
 from typing import List, Awaitable, Callable
 
 from bot.commands import DerfBot, NicBot
-from bot.commands import connect_to_voice, message_dispatcher
+from bot.commands import connect_to_voice
+
 from bot.workers.process_response_worker import (
     process_derf_response_queue,
     process_nic_response_queue,
@@ -48,6 +49,9 @@ async def derfbot_ready():
     await derf_bot.load_extension("bot.adventure")
     await derf_bot.load_extension("bot.quotes")
     await derf_bot.load_extension("bot.emoji")
+    await derf_bot.load_extension("bot.poll")
+    await derf_bot.load_extension("bot.misc")
+    await derf_bot.load_extension("bot.search")
     await setup_bot(
         bot_instance=derf_bot,
         name="DerfBot",
@@ -58,7 +62,6 @@ async def derfbot_ready():
             lambda: process_derf_response_queue(derf_bot),
             lambda: process_derf_summarizer_queue(derf_bot),
             lambda: monitor_derf_response_queue(derf_bot),
-            lambda: message_dispatcher(derf_bot),
         ],
     )
 
