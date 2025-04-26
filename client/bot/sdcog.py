@@ -79,23 +79,23 @@ class ImageGen(commands.Cog):
     @commands.command(name="spack", aliases=["", "gi"])
     async def generate_image(self, ctx):
         """Generates an image from war_waifus.json"""
-        # await ctx.trigger_typing()
-        try:
-            with open("war_waifus.json", "r") as f:
-                prompt = json.load(f)
+        async with ctx.typing():
+            try:
+                with open("war_waifus.json", "r") as f:
+                    prompt = json.load(f)
 
-                prompt["3"]["inputs"]["seed"] = generate_random_seed()
-                prompt["3"]["inputs"]["steps"] = get_random_steps()
-                prompt["3"]["inputs"]["cfg"] = get_random_cfg()
-                prompt["3"]["inputs"]["sampler_name"] = get_random_sampler()
+                    prompt["3"]["inputs"]["seed"] = generate_random_seed()
+                    prompt["3"]["inputs"]["steps"] = get_random_steps()
+                    prompt["3"]["inputs"]["cfg"] = get_random_cfg()
+                    prompt["3"]["inputs"]["sampler_name"] = get_random_sampler()
 
-            images = self.get_images(prompt)
-            for node_id, image_datas in images.items():
-                for image_data in image_datas:
-                    file = discord.File(BytesIO(image_data), filename="output.png")
-                    await ctx.send(file=file)
-        except Exception as e:
-            await self.spack_old(ctx)
+                images = self.get_images(prompt)
+                for node_id, image_datas in images.items():
+                    for image_data in image_datas:
+                        file = discord.File(BytesIO(image_data), filename="output.png")
+                        await ctx.send(file=file)
+            except Exception as e:
+                await self.spack_old(ctx)
 
     async def spack_old(self, ctx):
         """Sends a random image from the images directory."""
