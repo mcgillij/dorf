@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import discord
 from discord.ext import commands, tasks
 from bot.constants import FACTION_DB, DEFAULT_FACTIONS
+from bot.config import CHAT_CHANNEL_ID
 from bot.emoji import extract_emojis
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ class FactionCog(commands.Cog):
         self.bot = bot
         self.init_db()
         self.check_war_end.start()
+        self.check_war_warnings.start()
 
     def init_db(self):
         with sqlite3.connect(FACTION_DB) as conn:
@@ -78,6 +80,22 @@ class FactionCog(commands.Cog):
             """
             )
 
+            # Add warning columns if they don't exist yet (safe even if they already exist)
+            c.execute("PRAGMA table_info(war_state)")
+            columns = [row[1] for row in c.fetchall()]
+            if "warning_24h_sent" not in columns:
+                c.execute(
+                    "ALTER TABLE war_state ADD COLUMN warning_24h_sent INTEGER DEFAULT 0"
+                )
+            if "warning_12h_sent" not in columns:
+                c.execute(
+                    "ALTER TABLE war_state ADD COLUMN warning_12h_sent INTEGER DEFAULT 0"
+                )
+            if "warning_1h_sent" not in columns:
+                c.execute(
+                    "ALTER TABLE war_state ADD COLUMN warning_1h_sent INTEGER DEFAULT 0"
+                )
+
             # Seed factions if empty
             c.execute("SELECT COUNT(*) FROM factions")
             if c.fetchone()[0] == 0:
@@ -91,7 +109,63 @@ class FactionCog(commands.Cog):
             c.execute(
                 "INSERT OR IGNORE INTO war_state (id, started_at) VALUES (1, NULL)"
             )
+
             conn.commit()
+
+    def cog_unload(self):
+        self.check_war_warnings.cancel()
+
+    @tasks.loop(minutes=5)
+    async def check_war_warnings(self):
+        WAR_DURATION_DAYS = 30
+        with sqlite3.connect(FACTION_DB) as conn:
+            c = conn.cursor()
+            c.execute(
+                "SELECT started_at, warning_24h_sent, warning_12h_sent, warning_1h_sent FROM war_state WHERE id = 1"
+            )
+            row = c.fetchone()
+
+            if not row or not row[0]:
+                return  # No war active
+
+            war_start = datetime.fromisoformat(row[0])
+            war_end = war_start + timedelta(days=WAR_DURATION_DAYS)
+            now = datetime.utcnow()
+            time_left = war_end - now
+
+            warning_24h_sent, warning_12h_sent, warning_1h_sent = row[1:]
+
+            channel = self.bot.get_channel(CHAT_CHANNEL_ID)
+            if channel is None:
+                return  # channel doesn't exist, fail silently
+
+            updates = {}
+
+            if time_left.total_seconds() <= 86400 and not warning_24h_sent:
+                await channel.send(
+                    "⚔️ **24 hours remaining in the War!** Rally your forces and make every emoji count!"
+                )
+                updates["warning_24h_sent"] = 1
+
+            if time_left.total_seconds() <= 43200 and not warning_12h_sent:
+                await channel.send(
+                    "⏳ **12 hours left!** The final stretch is here — unleash your emoji power!"
+                )
+                updates["warning_12h_sent"] = 1
+
+            if time_left.total_seconds() <= 3600 and not warning_1h_sent:
+                await channel.send(
+                    "🔥 **Only 1 hour left!!** Everything you do now could change the outcome!"
+                )
+                updates["warning_1h_sent"] = 1
+
+            if updates:
+                # Save which warnings fired
+                set_clause = ", ".join([f"{key} = ?" for key in updates])
+                params = list(updates.values())
+                params.append(1)  # WHERE id = 1
+                c.execute(f"UPDATE war_state SET {set_clause} WHERE id = ?", params)
+                conn.commit()
 
     def assign_faction(self, user_id):
         with sqlite3.connect(FACTION_DB) as conn:
@@ -210,11 +284,11 @@ class FactionCog(commands.Cog):
                 datetime.fromisoformat(joined_at_row[0]) if joined_at_row else None
             )
 
-            # Faction members
+            # Faction members (fetch all user_ids instead of just count)
             c.execute(
-                "SELECT COUNT(*) FROM user_factions WHERE faction_id = ?", (faction_id,)
+                "SELECT user_id FROM user_factions WHERE faction_id = ?", (faction_id,)
             )
-            members = c.fetchone()[0]
+            user_ids = [row[0] for row in c.fetchall()]
 
             # Faction score
             c.execute(
@@ -222,6 +296,16 @@ class FactionCog(commands.Cog):
                 (faction_id,),
             )
             score = c.fetchone()[0] or 0
+
+        # Fetch usernames
+        members = []
+        for uid in user_ids:
+            member = ctx.guild.get_member(uid)
+            if member:
+                members.append(member.display_name)
+            else:
+                # fallback if user isn't in guild anymore
+                members.append(f"User ID {uid}")
 
         # Optional: Custom flavor/lore for each faction
         faction_flavor = {
@@ -240,8 +324,15 @@ class FactionCog(commands.Cog):
             value=joined_at.strftime("%Y-%m-%d") if joined_at else "Unknown",
             inline=True,
         )
-        embed.add_field(name="🧑‍🤝‍🧑 Members", value=str(members), inline=True)
+        embed.add_field(name="🧑‍🤝‍🧑 Members", value=str(len(user_ids)), inline=True)
         embed.add_field(name="💥 Faction Score", value=str(score), inline=True)
+
+        # New: add a field listing the members
+        member_list = ", ".join(members)
+        if len(member_list) > 1024:
+            member_list = member_list[:1020] + "..."  # Discord field limit
+
+        embed.add_field(name="👥 Member List", value=member_list, inline=False)
 
         embed.set_thumbnail(
             url="https://cdn-icons-png.flaticon.com/512/616/616408.png"
@@ -266,7 +357,7 @@ class FactionCog(commands.Cog):
             c.execute(
                 """
                 SELECT factions.id, factions.name, factions.symbol, factions.color, 
-                       SUM(faction_scores.usage_count) as score
+                    SUM(faction_scores.usage_count) as score
                 FROM factions
                 LEFT JOIN faction_scores ON factions.id = faction_scores.faction_id
                 GROUP BY factions.id
@@ -275,31 +366,46 @@ class FactionCog(commands.Cog):
             )
             rows = c.fetchall()
 
-            # Get faction sizes
+            # Get faction members
             c.execute(
                 """
-                SELECT faction_id, COUNT(*) 
-                FROM user_factions 
-                GROUP BY faction_id
+                SELECT user_id, faction_id 
+                FROM user_factions
             """
             )
-            member_counts = dict(c.fetchall())
+            all_members = c.fetchall()
+            member_map = {}
+            for user_id, faction_id in all_members:
+                member_map.setdefault(faction_id, []).append(user_id)
 
         if not rows:
             await ctx.send("No faction scores yet!")
             return
 
-        # Colors and medals
         medals = ["🥇", "🥈", "🥉"]
         embed_color = int(rows[0][3].replace("#", "0x"), 16)
         embed = discord.Embed(title="🌟 Faction Leaderboard", color=embed_color)
 
         for idx, (fid, name, symbol, color, score) in enumerate(rows):
             medal = medals[idx] if idx < len(medals) else "🏅"
-            members = member_counts.get(fid, 0)
+            member_ids = member_map.get(fid, [])
+
+            members = []
+            for member_id in member_ids:
+                member = self.bot.get_user(member_id) or await self.bot.fetch_user(
+                    member_id
+                )
+                members.append(
+                    member.display_name if member else f"User ID {member_id}"
+                )
+
+            member_list = ", ".join(members) if members else "No members"
+            if len(member_list) > 1024:
+                member_list = member_list[:1020] + "..."
+
             embed.add_field(
                 name=f"{medal} {symbol} {name}",
-                value=f"**Score:** `{score or 0}`\n**Members:** `{members}`",
+                value=f"**Score:** `{score or 0}`\n**Members ({len(members)}):** {member_list}",
                 inline=False,
             )
 
@@ -308,6 +414,86 @@ class FactionCog(commands.Cog):
                 text=f"Emoji War started on {war_start.strftime('%Y-%m-%d')}"
             )
             embed.timestamp = war_start
+
+        await ctx.send(embed=embed)
+
+    @commands.command(name="warstatus", aliases=["ws", "war_status"])
+    async def war_status(self, ctx):
+        WAR_DURATION_DAYS = 30  # or however long your war lasts
+        with sqlite3.connect(FACTION_DB) as conn:
+            c = conn.cursor()
+
+            # War start date
+            c.execute("SELECT started_at FROM war_state WHERE id = 1")
+            war_row = c.fetchone()
+            if not war_row or not war_row[0]:
+                await ctx.send("No war is currently active!")
+                return
+            war_start = datetime.fromisoformat(war_row[0])
+            war_end = war_start + timedelta(days=WAR_DURATION_DAYS)
+            time_remaining = war_end - datetime.utcnow()
+
+            # Total emoji usages
+            c.execute("SELECT SUM(usage_count) FROM faction_scores")
+            total_usage = c.fetchone()[0] or 0
+
+            # Faction scores
+            c.execute(
+                """
+                SELECT factions.name, factions.symbol, SUM(faction_scores.usage_count) as score
+                FROM factions
+                LEFT JOIN faction_scores ON factions.id = faction_scores.faction_id
+                GROUP BY factions.id
+                ORDER BY score DESC
+            """
+            )
+            faction_rows = c.fetchall()
+
+        if not faction_rows:
+            await ctx.send("No faction scores yet!")
+            return
+
+        leader_name, leader_symbol, leader_score = faction_rows[0]
+
+        embed = discord.Embed(
+            title="⚔️ War Status",
+            description="The battle rages on! Here's the current situation:",
+            color=0xFF5555,
+        )
+
+        embed.add_field(
+            name="📅 War Started", value=war_start.strftime("%Y-%m-%d"), inline=True
+        )
+        embed.add_field(
+            name="🧮 Total Emoji Uses", value=f"{total_usage:,}", inline=True
+        )
+        embed.add_field(
+            name="🏆 Leading Faction",
+            value=f"{leader_symbol} **{leader_name}** with **{leader_score:,}** points",
+            inline=False,
+        )
+
+        # Top 3 factions
+        top_factions = ""
+        medals = ["🥇", "🥈", "🥉"]
+        for idx, (name, symbol, score) in enumerate(faction_rows[:3]):
+            medal = medals[idx] if idx < len(medals) else ""
+            top_factions += f"{medal} {symbol} **{name}** - {score:,} points\n"
+        embed.add_field(name="🏅 Top Factions", value=top_factions, inline=False)
+
+        # Time remaining
+        if time_remaining.total_seconds() > 0:
+            days, remainder = divmod(int(time_remaining.total_seconds()), 86400)
+            hours, remainder = divmod(remainder, 3600)
+            minutes, _ = divmod(remainder, 60)
+            time_left_str = f"{days}d {hours}h {minutes}m"
+        else:
+            time_left_str = "The war has ended!"
+
+        embed.add_field(name="⏳ Time Remaining", value=time_left_str, inline=False)
+
+        embed.set_footer(text="Fight for your faction with emoji power!")
+        embed.timestamp = datetime.utcnow()
 
         await ctx.send(embed=embed)
 
