@@ -3,6 +3,8 @@ import uuid
 import json
 import logging
 
+import asyncio
+
 import discord
 from discord.ext import commands
 import websocket
@@ -88,8 +90,9 @@ class ImageGen(commands.Cog):
                     prompt["3"]["inputs"]["steps"] = get_random_steps()
                     prompt["3"]["inputs"]["cfg"] = get_random_cfg()
                     prompt["3"]["inputs"]["sampler_name"] = get_random_sampler()
+                    prompt["6"]["inputs"]["text"] = get_random_prompt()
 
-                images = self.get_images(prompt)
+                images = await asyncio.to_thread(self.get_images, prompt)
                 for node_id, image_datas in images.items():
                     for image_data in image_datas:
                         file = discord.File(BytesIO(image_data), filename="output.png")
@@ -128,6 +131,21 @@ def get_random_steps() -> int:
 
 def get_random_cfg() -> float:
     return random.uniform(5.0, 7.0)
+
+
+def get_random_prompt() -> str:
+    prompts = [
+        "Hot Waifu's in warhammer 40k power armor, large breasts in bikini top,masterpiece,best quality,amazing quality",
+        "Hot warhammer 40k succubus, large breasts in bikini top,masterpiece,best quality,amazing quality",
+        "Hot warhammer 40k Daughters of the Emperor, large breasts in bikini top,masterpiece,best quality,amazing quality",
+        "Hot warhammer 40k Adepta Sororitas, large breasts in bikini top,masterpiece,best quality,amazing quality",
+        "Hot warhammer 40k Sisters of Battle, large breasts in bikini top,masterpiece,best quality,amazing quality",
+        "Hot warhammer 40k Sisters of Silence, large breasts in bikini top,masterpiece,best quality,amazing quality",
+        "Hot warhammer 40k Silent Sisterhood, large breasts in bikini top,masterpiece,best quality,amazing quality",
+        "Hot warhammer 40k Null Maidens, large breasts in bikini top,masterpiece,best quality,amazing quality",
+        "Hot warhammer 40k Daughtes of the Abyss, large breasts in bikini top,masterpiece,best quality,amazing quality",
+    ]
+    return random.choice(prompts)
 
 
 async def setup(bot):
