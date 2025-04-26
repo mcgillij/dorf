@@ -10,7 +10,6 @@ from bot.constants import (
     NIC_RESPONSE_KEY_PREFIX,
 )
 from bot.redis_client import redis_client
-from bot.utilities import replace_userids_with_username
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +32,7 @@ async def process_response_queue(queue_name, response_key_prefix, bot):
             message = task["message"]
 
             # Call get_response
-            response = await bot.get_response(message)
-            response = await replace_userids_with_username(response)
+            response = await bot.llm.get_response(message)
 
             # Store the response in Redis for retrieval
             redis_client.set(f"{response_key_prefix}:{unique_id}", response)
@@ -44,8 +42,8 @@ async def process_response_queue(queue_name, response_key_prefix, bot):
 
 
 async def process_derf_response_queue(bot):
-    await process_response_queue(DERF_RESPONSE_KEY_PREFIX, DERF_RESPONSE_KEY, bot.llm)
+    await process_response_queue(DERF_RESPONSE_KEY_PREFIX, DERF_RESPONSE_KEY, bot)
 
 
 async def process_nic_response_queue(bot):
-    await process_response_queue(NIC_RESPONSE_KEY_PREFIX, NIC_RESPONSE_KEY, bot.llm)
+    await process_response_queue(NIC_RESPONSE_KEY_PREFIX, NIC_RESPONSE_KEY, bot)

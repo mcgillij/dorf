@@ -33,7 +33,7 @@ async def queue_message_processing(ctx, message: str, queue_name: str):
     # Store the context if not already stored
     context_dict.setdefault(unique_id, ctx)
     # Queue the message for processing
-    message = await replace_userids_with_username(message)
+    message = await replace_userids_with_username(ctx, message)
     redis_client.lpush(
         queue_name,
         json.dumps({"unique_id": unique_id, "message": f"{ctx.author.id}:{message}"}),
@@ -62,7 +62,7 @@ async def process_response(
     key = f"{response_key_prefix}:{unique_id}"
     response = await poll_redis_for_key(key)
     logger.debug(f"{response_key_prefix.capitalize()}: Response: {response}")
-    response = await replace_userids_with_username(response)
+    response = await replace_userids_with_username(ctx, response)
     logger.debug(
         f"{response_key_prefix.capitalize()}: Response after replacing userids: {response}"
     )

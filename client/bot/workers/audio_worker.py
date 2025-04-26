@@ -8,7 +8,6 @@ from kokoro import KPipeline
 import soundfile as sf
 
 from bot.processing import redis_client
-from bot.utilities import replace_userids_with_username
 from bot.constants import (
     DERF_AUDIO_QUEUE,
     DERF_PLAYBACK_QUEUE,
@@ -57,9 +56,6 @@ async def audio_task(queue_name, playback_queue_name, tts_voice, bot_instance):
             continue
 
         unique_id, line_number, line_text = task_data.split("|", 2)
-        line_text = await replace_userids_with_username(
-            line_text
-        )  # Assuming this is async
 
         num_users = (
             len(bot_instance.voice_clients[0].channel.members) - 1

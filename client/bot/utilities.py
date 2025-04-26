@@ -49,13 +49,18 @@ def get_random_image_path(directory):
         return None
 
 
-async def replace_userids_with_username(text: str) -> str:
+async def replace_userids_with_username(ctx, text: str) -> str:
     logger.info("Replacing user IDs with usernames")
     logger.debug(f"{text=}")
 
     async def replace_match(match: re.Match) -> str:
         user_id = int(match.group(1))
-        username = await sanitize_userid(user_id)
+        # lookup the user id with the ctx to get the displayname
+        user = ctx.guild.get_member(user_id)
+        if user:
+            username = user.display_name
+        else:
+            username = await sanitize_userid(user_id)
         return username
 
     async def replace_pattern(pattern: str, text: str) -> str:
