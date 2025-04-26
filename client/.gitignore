@@ -5,3 +5,4 @@ nohup*
 *.db
 spack
 frieren
+*.json

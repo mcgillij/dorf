@@ -56,6 +56,7 @@ async def derfbot_ready():
     await derf_bot.load_extension("bot.faction")
     await derf_bot.load_extension("bot.combo")
     await derf_bot.load_extension("bot.metrics")
+    await derf_bot.load_extension("bot.sdcog")
     await setup_bot(
         bot_instance=derf_bot,
         name="DerfBot",
