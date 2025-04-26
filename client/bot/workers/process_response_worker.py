@@ -3,6 +3,12 @@ import json
 import traceback
 import logging
 
+from bot.constants import (
+    DERF_RESPONSE_KEY,
+    DERF_RESPONSE_KEY_PREFIX,
+    NIC_RESPONSE_KEY,
+    NIC_RESPONSE_KEY_PREFIX,
+)
 from bot.redis_client import redis_client
 from bot.utilities import replace_userids_with_username
 
@@ -38,8 +44,8 @@ async def process_response_queue(queue_name, response_key_prefix, bot):
 
 
 async def process_derf_response_queue(bot):
-    await process_response_queue("response_queue", "response", bot.llm)
+    await process_response_queue(DERF_RESPONSE_KEY_PREFIX, DERF_RESPONSE_KEY, bot.llm)
 
 
 async def process_nic_response_queue(bot):
-    await process_response_queue("response_nic_queue", "response_nic", bot.llm)
+    await process_response_queue(NIC_RESPONSE_KEY_PREFIX, NIC_RESPONSE_KEY, bot.llm)

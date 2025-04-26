@@ -5,13 +5,20 @@ import logging
 from bot.redis_client import redis_client
 
 from bot.utilities import split_message
+
 from bot.processing import (
     poll_redis_for_key,
-    LONG_RESPONSE_THRESHOLD,
     process_derf_audio_queue,
     process_nic_audio_queue,
 )
 from bot.config import CHAT_CHANNEL_ID
+from bot.constants import (
+    DERF_RESPONSE_QUEUE,
+    DERF_SUMMARIZER_QUEUE,
+    LONG_RESPONSE_THRESHOLD,
+    NIC_SUMMARIZER_QUEUE,
+    VOICE_NIC_RESPONSE_QUEUE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,10 +107,10 @@ async def process_response_queue(
 async def monitor_nic_response_queue(bot):
     """Monitor the Redis voice response queue for Nic."""
     await process_response_queue(
-        "voice_nic_response_queue",
+        VOICE_NIC_RESPONSE_QUEUE,
         bot,
         process_nic_audio_queue,
-        "summarizer_nic_queue",
+        NIC_SUMMARIZER_QUEUE,
     )
 
 
@@ -111,8 +118,5 @@ async def monitor_nic_response_queue(bot):
 async def monitor_derf_response_queue(bot):
     """Monitor the Redis voice response queue."""
     await process_response_queue(
-        "voice_response_queue",
-        bot,
-        process_derf_audio_queue,
-        "summarizer_queue",
+        DERF_RESPONSE_QUEUE, bot, process_derf_audio_queue, DERF_SUMMARIZER_QUEUE
     )

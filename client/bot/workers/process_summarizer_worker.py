@@ -2,12 +2,17 @@ import asyncio
 import json
 import traceback
 import logging
+from bot.constants import (
+    DERF_SUMMARIZER_QUEUE,
+    NIC_SUMMARIZER_QUEUE,
+    SUMMARIZER_RESPONSE_KEY,
+)
 from bot.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 
 
-async def process_queue(queue_name, bot, response_key_prefix):
+async def process_queue(queue_name, response_key_prefix, bot):
     """
     Generic function to process requests from a Redis queue.
     """
@@ -24,7 +29,7 @@ async def process_queue(queue_name, bot, response_key_prefix):
             message = task["message"]
 
             # Call the bot's get_summarizer_response
-            response = await bot.get_summarizer_response(message)
+            response = await bot.llm.get_summarizer_response(message)
 
             # Store the response in Redis for retrieval
             redis_client.set(f"{response_key_prefix}:{unique_id}", response)
@@ -37,11 +42,11 @@ async def process_derf_summarizer_queue(bot):
     """
     Wrapper for processing the summarizer queue using derf_bot.
     """
-    await process_queue("summarizer_queue", bot.llm, "summarizer")
+    await process_queue(DERF_SUMMARIZER_QUEUE, SUMMARIZER_RESPONSE_KEY, bot)
 
 
 async def process_nic_summarizer_queue(bot):
     """
     Wrapper for processing the nic_summarizer queue using nicole_bot.
     """
-    await process_queue("nic_summarizer_queue", bot.llm, "summarizer")
+    await process_queue(NIC_SUMMARIZER_QUEUE, SUMMARIZER_RESPONSE_KEY, bot)

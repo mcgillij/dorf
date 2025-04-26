@@ -4,10 +4,18 @@ from bot.config import WHEREAMI
 DERF_RESPONSE_QUEUE = "voice_response_queue"
 DERF_RESPONSE_KEY_PREFIX = "response_queue"
 DERF_SUMMARIZER_QUEUE = "summarizer_queue"
+DERF_RESPONSE_KEY = "response"
+DERF_AUDIO_QUEUE = "audio_queue"
+DERF_PLAYBACK_QUEUE = "playback_queue"
+
+SUMMARIZER_RESPONSE_KEY = "summarizer"
 
 NIC_RESPONSE_QUEUE = "voice_nic_response_queue"
 NIC_RESPONSE_KEY_PREFIX = "response_nic_queue"
-NIC_SUMMARIZER_QUEUE = "summarizer_nic_queue"
+NIC_SUMMARIZER_QUEUE = "nic_summarizer_queue"
+NIC_RESPONSE_KEY = "response_nic"
+NIC_AUDIO_QUEUE = "audio_nic_queue"
+NIC_PLAYBACK_QUEUE = "playback_nic_queue"
 
 # Redis queue names as constants
 WHISPER_QUEUE = "whisper_queue"

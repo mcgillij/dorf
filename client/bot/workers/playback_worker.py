@@ -2,6 +2,7 @@ import asyncio
 import os
 import discord
 import logging
+from bot.constants import DERF_PLAYBACK_QUEUE, NIC_PLAYBACK_QUEUE
 from bot.redis_client import redis_client
 from bot.config import VOICE_CHANNEL_ID
 
@@ -75,11 +76,11 @@ async def playback_derf_task(bot):
     """
     Wrapper for the playback task for the main bot.
     """
-    await playback_task(bot, "playback_queue", VOICE_CHANNEL_ID)
+    await playback_task(bot, DERF_PLAYBACK_QUEUE, VOICE_CHANNEL_ID)
 
 
 async def playback_nic_task(bot):
     """
     Wrapper for the playback task for the nic_bot.
     """
-    await playback_task(bot, "playback_nic_queue", VOICE_CHANNEL_ID)
+    await playback_task(bot, NIC_PLAYBACK_QUEUE, VOICE_CHANNEL_ID)

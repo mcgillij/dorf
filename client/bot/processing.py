@@ -8,7 +8,17 @@ from bot.utilities import (
     replace_userids_with_username,
 )
 from bot.redis_client import redis_client
-from bot.constants import LONG_RESPONSE_THRESHOLD
+from bot.constants import (
+    LONG_RESPONSE_THRESHOLD,
+    DERF_SUMMARIZER_QUEUE,
+    NIC_SUMMARIZER_QUEUE,
+    DERF_RESPONSE_KEY_PREFIX,
+    NIC_RESPONSE_KEY_PREFIX,
+    DERF_RESPONSE_KEY,
+    NIC_RESPONSE_KEY,
+    DERF_AUDIO_QUEUE,
+    NIC_AUDIO_QUEUE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +43,11 @@ async def queue_message_processing(ctx, message: str, queue_name: str):
 
 # Wrappers for specific queues
 async def queue_derf_message_processing(ctx, message: str):
-    return await queue_message_processing(ctx, message, "response_queue")
+    return await queue_message_processing(ctx, message, DERF_RESPONSE_KEY_PREFIX)
 
 
 async def queue_nic_message_processing(ctx, message: str):
-    return await queue_message_processing(ctx, message, "response_nic_queue")
+    return await queue_message_processing(ctx, message, NIC_RESPONSE_KEY_PREFIX)
 
 
 # Generalized function to process and send responses
@@ -88,8 +98,8 @@ async def process_derf_response(ctx, unique_id: str):
     await process_response(
         ctx,
         unique_id,
-        "response",
-        "summarizer_queue",
+        DERF_RESPONSE_KEY,
+        DERF_SUMMARIZER_QUEUE,
         process_derf_audio_queue,
     )
 
@@ -98,8 +108,8 @@ async def process_nic_response(ctx, unique_id: str):
     await process_response(
         ctx,
         unique_id,
-        "response_nic",
-        "summarizer_nic_queue",
+        NIC_RESPONSE_KEY,
+        NIC_SUMMARIZER_QUEUE,
         process_nic_audio_queue,
     )
 
@@ -115,8 +125,8 @@ async def process_audio_queue(unique_id: str, messages: list[str], queue_name: s
 
 # Wrappers for specific audio queues
 async def process_derf_audio_queue(unique_id: str, messages: list[str]):
-    await process_audio_queue(unique_id, messages, "audio_queue")
+    await process_audio_queue(unique_id, messages, DERF_AUDIO_QUEUE)
 
 
 async def process_nic_audio_queue(unique_id: str, messages: list[str]):
-    await process_audio_queue(unique_id, messages, "audio_nic_queue")
+    await process_audio_queue(unique_id, messages, NIC_AUDIO_QUEUE)

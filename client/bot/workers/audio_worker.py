@@ -9,7 +9,14 @@ import soundfile as sf
 
 from bot.processing import redis_client
 from bot.utilities import replace_userids_with_username
-from bot.constants import TTS_ENGINE, TTS_VOICE, TTS_VOICE_NICOLE
+from bot.constants import (
+    DERF_AUDIO_QUEUE,
+    DERF_PLAYBACK_QUEUE,
+    NIC_AUDIO_QUEUE,
+    NIC_PLAYBACK_QUEUE,
+    TTS_VOICE,
+    TTS_VOICE_NICOLE,
+)
 
 logger = logging.getLogger(__name__)
 pipeline = KPipeline(lang_code="a")  # english
@@ -95,8 +102,8 @@ async def audio_task(queue_name, playback_queue_name, tts_voice, bot_instance):
 
 async def nic_audio_task(bot):
     await audio_task(
-        queue_name="audio_nic_queue",
-        playback_queue_name="playback_nic_queue",
+        queue_name=NIC_AUDIO_QUEUE,
+        playback_queue_name=NIC_PLAYBACK_QUEUE,
         tts_voice=TTS_VOICE_NICOLE,
         bot_instance=bot,
     )
@@ -104,8 +111,8 @@ async def nic_audio_task(bot):
 
 async def derf_audio_task(bot):
     await audio_task(
-        queue_name="audio_queue",
-        playback_queue_name="playback_queue",
+        queue_name=DERF_AUDIO_QUEUE,
+        playback_queue_name=DERF_PLAYBACK_QUEUE,
         tts_voice=TTS_VOICE,
         bot_instance=bot,
     )
