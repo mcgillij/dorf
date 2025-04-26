@@ -56,6 +56,17 @@ class MiscCog(commands.Cog):
         else:
             await ctx.send(f"No images found in the '{FRIEREN_DIR}' directory.")
 
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        if message.author.bot:
+            return  # Ignore bot messages
+
+        content = message.content.strip()
+
+        if content.lower().startswith("chup"):
+            await message.channel.send("NO U CHUP!")
+            return
+
     @commands.command()
     async def marne(self, ctx):
         """send the url to spackmarne.com"""

@@ -114,6 +114,43 @@ class Leveling(commands.Cog):
             except (discord.Forbidden, discord.HTTPException) as e:
                 logger.error(f"Failed to assign roles for {member.display_name}: {e}")
 
+    @commands.command(name="reassign_all_roles")
+    @commands.has_permissions(administrator=True)
+    @commands.guild_only()
+    async def reassign_all_roles(self, ctx):
+        await ctx.send(
+            "Reassigning roles based on user levels. This may take a moment..."
+        )
+
+        success_count = 0
+        fail_count = 0
+
+        for member in ctx.guild.members:
+            if member.bot:
+                continue
+
+            level = self.get_user_level(member.id)  # Replace this with your own method
+            if level is None:
+                continue
+
+            try:
+                await self.check_and_assign_roles(member, level)
+                success_count += 1
+            except Exception as e:
+                logger.error(f"Failed to assign role for {member.display_name}: {e}")
+                fail_count += 1
+
+        await ctx.send(
+            f"Finished! ✅ {success_count} users updated, ❌ {fail_count} failed."
+        )
+
+    def get_user_level(self, user_id: int) -> int | None:
+        with sqlite3.connect(XP_DB) as conn:
+            c = conn.cursor()
+            c.execute("SELECT level FROM user_xp WHERE user_id = ?", (user_id,))
+            level = c.fetchone()
+            return level[0] if level else None
+
     async def get_user_stats(self, ctx, guild=None, channel=None):
         user_id = ctx.author.id
         with sqlite3.connect(XP_DB) as conn:
