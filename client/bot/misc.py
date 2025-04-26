@@ -5,10 +5,10 @@ from random import choice
 import dice
 import discord
 from discord.ext import commands
+from bot.utilities import get_random_image_path
 
 logger = logging.getLogger(__name__)
 from bot.constants import (
-    SPACK_DIR,
     FRIEREN_DIR,
 )
 
@@ -25,21 +25,6 @@ class MiscCog(commands.Cog):
         await ctx.send(
             f"Bots found: {', '.join(bots) if bots else 'No bots detected.'}"
         )
-
-    @commands.command()
-    async def spack(self, ctx):
-        """Sends a random image from the images directory."""
-        image_path = get_random_image_path(SPACK_DIR)
-        logger.info(f"Image path: {image_path}")
-        if image_path:
-            try:
-                with open(image_path, "rb") as f:
-                    picture = discord.File(f)
-                    await ctx.send(file=picture)
-            except FileNotFoundError:
-                await ctx.send("Image file not found (even though path was generated).")
-        else:
-            await ctx.send(f"No images found in the '{SPACK_DIR}' directory.")
 
     @commands.command()
     async def frieren(self, ctx):
@@ -123,35 +108,3 @@ class MiscCog(commands.Cog):
 async def setup(bot):
     await bot.add_cog(MiscCog(bot))
     logger.info("MISC Cog loaded successfully.")
-
-
-def get_random_image_path(directory):
-    """
-    Returns a random image file path from the specified directory.
-
-    Args:
-        directory (str): The path to the directory containing images.
-
-    Returns:
-        str: The full path to a randomly selected image file, or None if no images are found.
-    """
-    try:
-        image_files = [
-            entry.name
-            for entry in os.scandir(directory)
-            if entry.is_file()
-            and entry.name.lower().endswith((".png", ".jpg", ".jpeg", ".gif"))
-        ]  # Filter for common image extensions
-
-        if not image_files:
-            print(f"No images found in directory: {directory}")  # helpful debug message
-            return None
-
-        random_image = choice(image_files)
-        return os.path.join(directory, random_image)  # Construct the full path
-    except FileNotFoundError:
-        print(f"Directory not found: {directory}")
-        return None
-    except Exception as e:
-        print(f"An error occurred: {e}")  # Catch other potential errors
-        return None

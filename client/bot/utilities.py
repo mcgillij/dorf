@@ -1,5 +1,6 @@
 import re
-from random import randint
+import os
+from random import randint, choice
 import aiohttp
 import asyncio
 import traceback
@@ -12,6 +13,40 @@ from bot.constants import FILTERED_KEYWORDS
 timeout = aiohttp.ClientTimeout(total=120)
 
 logger = logging.getLogger(__name__)
+
+
+def get_random_image_path(directory):
+    """
+    Returns a random image file path from the specified directory.
+
+    Args:
+        directory (str): The path to the directory containing images.
+
+    Returns:
+        str: The full path to a randomly selected image file, or None if no images are found.
+    """
+    try:
+        image_files = [
+            entry.name
+            for entry in os.scandir(directory)
+            if entry.is_file()
+            and entry.name.lower().endswith((".png", ".jpg", ".jpeg", ".gif"))
+        ]  # Filter for common image extensions
+
+        if not image_files:
+            logger.info(
+                f"No images found in directory: {directory}"
+            )  # helpful debug message
+            return None
+
+        random_image = choice(image_files)
+        return os.path.join(directory, random_image)  # Construct the full path
+    except FileNotFoundError:
+        logger.info(f"Directory not found: {directory}")
+        return None
+    except Exception as e:
+        logger.info(f"An error occurred: {e}")  # Catch other potential errors
+        return None
 
 
 async def replace_userids_with_username(text: str) -> str:

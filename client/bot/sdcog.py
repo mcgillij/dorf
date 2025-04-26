@@ -10,6 +10,11 @@ import urllib.request
 import urllib.parse
 from io import BytesIO
 
+from bot.constants import (
+    SPACK_DIR,
+)
+from bot.utilities import get_random_image_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -71,7 +76,7 @@ class ImageGen(commands.Cog):
         ws.close()
         return output_images
 
-    @commands.command(name="generateimage", aliases=["newspack", "gi"])
+    @commands.command(name="spack", aliases=["", "gi"])
     async def generate_image(self, ctx):
         """Generates an image from war_waifus.json"""
         # await ctx.trigger_typing()
@@ -90,7 +95,21 @@ class ImageGen(commands.Cog):
                     file = discord.File(BytesIO(image_data), filename="output.png")
                     await ctx.send(file=file)
         except Exception as e:
-            await ctx.send(f"Failed to generate image: `{e}`")
+            await self.spack_old(ctx)
+
+    async def spack_old(self, ctx):
+        """Sends a random image from the images directory."""
+        image_path = get_random_image_path(SPACK_DIR)
+        logger.info(f"Image path: {image_path}")
+        if image_path:
+            try:
+                with open(image_path, "rb") as f:
+                    picture = discord.File(f)
+                    await ctx.send(file=picture)
+            except FileNotFoundError:
+                await ctx.send("Image file not found (even though path was generated).")
+        else:
+            await ctx.send(f"No images found in the '{SPACK_DIR}' directory.")
 
 
 def generate_random_seed() -> int:
