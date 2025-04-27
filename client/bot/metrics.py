@@ -1,6 +1,6 @@
 import io
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 import discord
@@ -116,7 +116,7 @@ class Metrics(commands.Cog):
 
     @tasks.loop(hours=24)
     async def aggregate_metrics(self):
-        one_week_ago = datetime.utcnow() - timedelta(days=7)
+        one_week_ago = datetime.now(timezone.utc) - timedelta(days=7)
         with sqlite3.connect(METRICS_DB) as conn:
             c = conn.cursor()
             c.execute(

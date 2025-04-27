@@ -60,7 +60,7 @@ async def send_fancy_levelup(destination, user, level, new_title=None, next_titl
 
 
 def get_current_timestamp():
-    return datetime.datetime.utcnow().timestamp()
+    return datetime.datetime.now(datetime.timezone.utc).timestamp()
 
 
 async def setup(bot):
