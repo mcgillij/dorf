@@ -32,6 +32,8 @@ MAX_PREDICTION_ROUNDS = 10
 
 # LLM Responses
 LONG_RESPONSE_THRESHOLD = 1000
+# llm search
+RELEVANT_THRESHOLD = 0.5
 # Commands
 EMOJI_DB = "emojis.db"
 MACRO_DB = "macros.db"
