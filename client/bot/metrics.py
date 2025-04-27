@@ -9,7 +9,7 @@ from discord.ext import commands, tasks
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from bot.constants import METRICS_DB
+from bot.constants import METRICS_DB, EMOJI_DB
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +161,45 @@ class Metrics(commands.Cog):
         buf.seek(0)
         plt.close()
         return discord.File(buf, filename="plot.png")
+
+    @commands.command(name="emoji_usage")
+    async def emoji_usage(self, ctx):
+        """Show overall emoji usage metrics."""
+        with sqlite3.connect(EMOJI_DB) as conn:
+            df = pd.read_sql_query(
+                """
+                SELECT emoji, SUM(usage_count) as total_usage
+                FROM emoji_usage
+                GROUP BY emoji
+                ORDER BY total_usage DESC
+                LIMIT 10
+                """,
+                conn,
+            )
+        df.set_index("emoji", inplace=True)
+        file = self.create_plot_and_send(ctx, df, "Top Emojis", "Emoji", "Usage Count")
+        await ctx.send(file=file)
+
+    @commands.command(name="emoji_trends")
+    async def emoji_trends(self, ctx, emoji_char: str):
+        """Show usage trends for a specific emoji."""
+        with sqlite3.connect(EMOJI_DB) as conn:
+            df = pd.read_sql_query(
+                """
+                SELECT date(last_used) as day, SUM(usage_count) as count
+                FROM emoji_usage
+                WHERE emoji = ?
+                GROUP BY day
+                ORDER BY day ASC
+                """,
+                conn,
+                params=(emoji_char,),
+            )
+        df.set_index("day", inplace=True)
+        file = self.create_plot_and_send(
+            ctx, df, f"Usage Trend: {emoji_char}", "Date", "Usage Count"
+        )
+        await ctx.send(file=file)
 
     @commands.command(name="activity_over_time")
     async def activity_over_time(self, ctx):
