@@ -1,7 +1,7 @@
 import sqlite3
 import random
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands, tasks
@@ -112,12 +112,12 @@ class FactionCog(commands.Cog):
 
             conn.commit()
 
-    def cog_unload(self):
+    async def cog_unload(self):
         self.check_war_warnings.cancel()
 
     @tasks.loop(minutes=5)
     async def check_war_warnings(self):
-        WAR_DURATION_DAYS = 30
+        WAR_DURATION_DAYS = 7
         with sqlite3.connect(FACTION_DB) as conn:
             c = conn.cursor()
             c.execute(
@@ -128,9 +128,9 @@ class FactionCog(commands.Cog):
             if not row or not row[0]:
                 return  # No war active
 
-            war_start = datetime.fromisoformat(row[0])
+            war_start = datetime.fromisoformat(row[0]).replace(tzinfo=timezone.utc)
             war_end = war_start + timedelta(days=WAR_DURATION_DAYS)
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             time_left = war_end - now
 
             warning_24h_sent, warning_12h_sent, warning_1h_sent = row[1:]
@@ -281,7 +281,9 @@ class FactionCog(commands.Cog):
             )
             joined_at_row = c.fetchone()
             joined_at = (
-                datetime.fromisoformat(joined_at_row[0]) if joined_at_row else None
+                datetime.fromisoformat(joined_at_row[0]).replace(tzinfo=timezone.utc)
+                if joined_at_row
+                else None
             )
 
             # Faction members (fetch all user_ids instead of just count)
@@ -350,7 +352,9 @@ class FactionCog(commands.Cog):
             c.execute("SELECT started_at FROM war_state WHERE id = 1")
             war_row = c.fetchone()
             war_start = (
-                datetime.fromisoformat(war_row[0]) if war_row and war_row[0] else None
+                datetime.fromisoformat(war_row[0]).replace(tzinfo=timezone.utc)
+                if war_row and war_row[0]
+                else None
             )
 
             # Get faction scores
@@ -419,7 +423,7 @@ class FactionCog(commands.Cog):
 
     @commands.command(name="warstatus", aliases=["ws", "war_status"])
     async def war_status(self, ctx):
-        WAR_DURATION_DAYS = 30  # or however long your war lasts
+        WAR_DURATION_DAYS = 7
         with sqlite3.connect(FACTION_DB) as conn:
             c = conn.cursor()
 
@@ -429,9 +433,9 @@ class FactionCog(commands.Cog):
             if not war_row or not war_row[0]:
                 await ctx.send("No war is currently active!")
                 return
-            war_start = datetime.fromisoformat(war_row[0])
+            war_start = datetime.fromisoformat(war_row[0]).replace(tzinfo=timezone.utc)
             war_end = war_start + timedelta(days=WAR_DURATION_DAYS)
-            time_remaining = war_end - datetime.utcnow()
+            time_remaining = war_end - datetime.now(timezone.utc)
 
             # Total emoji usages
             c.execute("SELECT SUM(usage_count) FROM faction_scores")
@@ -493,7 +497,7 @@ class FactionCog(commands.Cog):
         embed.add_field(name="⏳ Time Remaining", value=time_left_str, inline=False)
 
         embed.set_footer(text="Fight for your faction with emoji power!")
-        embed.timestamp = datetime.utcnow()
+        embed.timestamp = datetime.now(timezone.utc)
 
         await ctx.send(embed=embed)
 
@@ -505,15 +509,15 @@ class FactionCog(commands.Cog):
             row = c.fetchone()
 
             if row and row[0]:
-                started_at = datetime.fromisoformat(row[0])
-                delta = datetime.utcnow() - started_at
+                started_at = datetime.fromisoformat(row[0]).replace(tzinfo=timezone.utc)
+                delta = datetime.now(timezone.utc) - started_at
                 if delta.days < 7:
                     await ctx.send(
                         f":warning: An emoji war is already ongoing! It started on `{started_at.date()}`."
                     )
                     return
 
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).isoformat()
             c.execute("UPDATE war_state SET started_at = ? WHERE id = 1", (now,))
             c.execute("DELETE FROM faction_scores")
             conn.commit()
@@ -531,8 +535,8 @@ class FactionCog(commands.Cog):
             result = c.fetchone()
             if not result or not result[0]:
                 return
-            start_time = datetime.fromisoformat(result[0])
-            if datetime.utcnow() - start_time >= timedelta(weeks=1):
+            start_time = datetime.fromisoformat(result[0]).replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - start_time >= timedelta(weeks=1):
                 c.execute("SELECT * FROM faction_scores")
                 scores = c.fetchall()
                 for faction_id, emoji, count, _ in scores:
