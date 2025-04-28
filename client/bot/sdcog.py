@@ -48,6 +48,7 @@ class ImageGen(commands.Cog):
         self.server_address = "127.0.0.1:8188"
         self.client_id = str(uuid.uuid4())
         self.emoji = "👍"
+        self.photo_emoji = "👎"
 
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
@@ -56,9 +57,13 @@ class ImageGen(commands.Cog):
         if user.bot:
             return  # Ignore bot reactions
         logger.info(f"Reaction: {reaction.message}")
-        if str(reaction.emoji) != str(self.emoji):
+        if str(reaction.emoji) not in [str(self.emoji), str(self.photo_emoji)]:
             logger.info(f"Reaction: {reaction.emoji} is not a {self.emoji}")
             return
+
+        photo = False
+        if reaction.emoji == self.photo_emoji:
+            photo = True
 
         message = reaction.message
         if message.attachments:
@@ -86,9 +91,7 @@ class ImageGen(commands.Cog):
 
                 file_path, file_name = save_image_to_input_dir(image_data)
                 logger.info(f"Image saved to {file_path}")
-                await message.channel.send(
-                    f"Image saved for processing at {file_path}."
-                )
+                await message.channel.send(f"Image processing ...")
                 async with reaction.message.channel.typing():
                     try:
                         with open("input_spack.json", "r") as f:
@@ -96,9 +99,16 @@ class ImageGen(commands.Cog):
                             prompt["2"]["inputs"]["image"] = file_name
                             prompt["5"]["inputs"]["seed"] = generate_random_seed()
                             prompt["5"]["inputs"]["steps"] = get_random_steps()
+                            if photo:
+                                prompt["5"]["inputs"]["denoise"] = 0.4000000000000001
                             prompt["5"]["inputs"]["cfg"] = get_random_cfg()
                             prompt["5"]["inputs"]["sampler_name"] = get_random_sampler()
-                            prompt["3"]["inputs"]["text"] = get_random_prompt()
+                            if photo:
+                                prompt["3"]["inputs"][
+                                    "text"
+                                ] = "Hot anime version of the people in the image already, masterpiece, best quality, amazing quality"
+                            else:
+                                prompt["3"]["inputs"]["text"] = get_random_prompt()
 
                         images = await asyncio.to_thread(self.get_images, prompt)
                         for node_id, image_datas in images.items():
@@ -213,7 +223,7 @@ def get_random_sampler() -> str:
 
 
 def get_random_steps() -> int:
-    return random.randint(16, 40)
+    return random.randint(16, 35)
 
 
 def get_random_cfg() -> float:
