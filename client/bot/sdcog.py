@@ -2,6 +2,7 @@ import random
 import uuid
 import json
 import logging
+from io import BytesIO
 
 import asyncio
 
@@ -10,6 +11,8 @@ from discord.ext import commands
 import websocket
 import urllib.request
 import urllib.parse
+
+from PIL import Image
 from io import BytesIO
 
 from bot.constants import (
@@ -25,6 +28,44 @@ class ImageGen(commands.Cog):
         self.bot = bot
         self.server_address = "127.0.0.1:8188"
         self.client_id = str(uuid.uuid4())
+        self.emoji = "👍"
+
+    @commands.Cog.listener()
+    async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
+        logger.info(f"str emoji {str(reaction.emoji)}")
+        logger.info(f"Reaction added by {user}: {reaction.emoji}")
+        if user.bot:
+            return  # Ignore bot reactions
+        logger.info(f"Reaction: {reaction.message}")
+        if str(reaction.emoji) != str(self.emoji):
+            logger.info(f"Reaction: {reaction.emoji} is not a {self.emoji}")
+            return
+
+        message = reaction.message
+        if message.attachments:
+            logger.info(f"Attachment found in message: {message.attachments[0].url}")
+            attachment_url = message.attachments[0].url
+
+            try:
+                # Fetch the image
+                headers = {"User-Agent": "Mozilla/5.0"}
+                file_request = urllib.request.Request(attachment_url, headers=headers)
+
+                # Fetch the image
+                with urllib.request.urlopen(file_request) as response:
+                    image_data = response.read()
+
+                image = Image.open(BytesIO(image_data))
+                width, height = image.size
+                logger.info(f"Image dimensions: {width}x{height}")
+
+                # Send the dimensions to the Discord chat
+                await message.channel.send(
+                    f"The image dimensions are {width}x{height}."
+                )
+            except Exception as e:
+                logger.error(f"Failed to process the image: {e}")
+                await message.channel.send("Failed to process the image.")
 
     def queue_prompt(self, prompt):
         p = {"prompt": prompt, "client_id": self.client_id}

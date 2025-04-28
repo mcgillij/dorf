@@ -29,6 +29,7 @@ matplotlib = "^3.10.1"
 websocket-client = "^1.8.0"
 trafilatura = "^2.0.0"
 chromadb = "^1.0.7"
+pillow = "^11.2.1"
 
 
 [tool.poetry.group.dev.dependencies]
