@@ -3,6 +3,8 @@ import uuid
 import json
 import logging
 from io import BytesIO
+from pathlib import Path
+import tempfile
 
 import asyncio
 
@@ -19,6 +21,23 @@ from bot.constants import (
     SPACK_DIR,
 )
 from bot.utilities import get_random_image_path
+
+# dir for input images
+
+INPUT_IMAGE_DIR = Path("/home/j/ComfyUI/input")
+INPUT_IMAGE_DIR.mkdir(exist_ok=True)
+
+MAX_IMAGE_HEIGHT = 1024
+
+
+def save_image_to_input_dir(image_data):
+    with tempfile.NamedTemporaryFile(
+        dir=INPUT_IMAGE_DIR, suffix=".png", delete=False
+    ) as tmp_file:
+        tmp_file.write(image_data)
+        file_path = Path(tmp_file.name)
+    return (file_path, tmp_file.name)
+
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +78,37 @@ class ImageGen(commands.Cog):
                 width, height = image.size
                 logger.info(f"Image dimensions: {width}x{height}")
 
-                # Send the dimensions to the Discord chat
+                if width > MAX_IMAGE_HEIGHT or height > MAX_IMAGE_HEIGHT:
+                    await message.channel.send(
+                        f"Image is too large. Maximum allowed dimensions are {MAX_IMAGE_HEIGHT}x{MAX_IMAGE_HEIGHT}."
+                    )
+                    return
+
+                file_path, file_name = save_image_to_input_dir(image_data)
+                logger.info(f"Image saved to {file_path}")
                 await message.channel.send(
-                    f"The image dimensions are {width}x{height}."
+                    f"Image saved for processing at {file_path}."
                 )
+                async with reaction.message.channel.typing():
+                    try:
+                        with open("input_spack.json", "r") as f:
+                            prompt = json.load(f)
+                            prompt["2"]["inputs"]["image"] = file_name
+                            prompt["5"]["inputs"]["seed"] = generate_random_seed()
+                            prompt["5"]["inputs"]["steps"] = get_random_steps()
+                            prompt["5"]["inputs"]["cfg"] = get_random_cfg()
+                            prompt["5"]["inputs"]["sampler_name"] = get_random_sampler()
+                            prompt["3"]["inputs"]["text"] = get_random_prompt()
+
+                        images = await asyncio.to_thread(self.get_images, prompt)
+                        for node_id, image_datas in images.items():
+                            for image_data in image_datas:
+                                file = discord.File(
+                                    BytesIO(image_data), filename="output.png"
+                                )
+                                await reaction.message.channel.send(file=file)
+                    except Exception as e:
+                        logger.info(f"Error while processing the image: {e}")
             except Exception as e:
                 logger.error(f"Failed to process the image: {e}")
                 await message.channel.send("Failed to process the image.")
