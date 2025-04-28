@@ -73,10 +73,49 @@ async def search_internet(q: str, callback=None) -> List[Dict]:
                     else:
                         logger.info("Skipping search result score TOO LOW")
 
-                # (optional) persist Chroma to disk
-                # chroma_client.persist()
-
                 return results
             else:
                 logger.info(f"Failed to retrieve data. Status code: {response.status}")
+                return []
+
+
+async def search_source(source_url: str, topic: str, callback=None) -> List[Dict]:
+    """Search a specific source for the current week's entries related to a topic."""
+    logger.info(f"Searching {source_url} for topic: {topic}")
+    url = SEARCH_URL
+    params = {
+        "q": f"site: {source_url} {topic}",
+        "format": "json",
+        "time_range": "week",
+    }  # Narrow to current week
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params, ssl=True) as response:
+            if response.status == 200:
+                data = await response.text()
+                data = json.loads(data)
+                results = []
+
+                for result in data.get("results", []):
+                    title = result.get("title")
+                    url = result.get("url")
+                    score = result.get("score")
+                    content = result.get("content")
+
+                    if score > RELEVANT_THRESHOLD:
+                        results.append(
+                            {
+                                "url": url,
+                                "title": title,
+                                "score": score,
+                                "content": content,
+                            }
+                        )
+                        if callback:
+                            callback(param=f"Found relevant result: [{title}](<{url}>)")
+                return results
+            else:
+                logger.info(
+                    f"Failed to retrieve data from {source_url}. Status code: {response.status}"
+                )
                 return []

@@ -11,11 +11,6 @@ from bot.chroma import RAGContextBuilder, collection
 rag_builder = RAGContextBuilder(collection, search_internet, similarity_threshold=0.5)
 logger = logging.getLogger(__name__)
 
-# async def handle_query(query, callback):
-# docs = await rag_builder.retrieve(query, callback=callback)
-# context_text = rag_builder.build_context_text(docs)
-# return context_text
-
 
 async def wrap_model(model, query, on_message=None, callback=None) -> str:
     """Wrap a synchronous call in an async context if necessary."""

@@ -39,6 +39,7 @@ EMOJI_DB = "emojis.db"
 MACRO_DB = "macros.db"
 FACTION_DB = "faction_data.db"
 METRICS_DB = "metrics.db"
+NEWS_DB = "news_agent.db"
 
 # factions
 DEFAULT_FACTIONS = [
