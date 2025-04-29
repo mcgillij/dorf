@@ -47,8 +47,8 @@ class ImageGen(commands.Cog):
         self.bot = bot
         self.server_address = "127.0.0.1:8188"
         self.client_id = str(uuid.uuid4())
-        self.emoji = "👍"
-        self.photo_emoji = "👎"
+        self.emoji = "🎨"
+        self.photo_emoji = "📷"
 
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
