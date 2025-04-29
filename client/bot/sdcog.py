@@ -73,13 +73,9 @@ class ImageGen(commands.Cog):
                 width, height = image.size
                 logger.info(f"Image dimensions: {width}x{height}")
 
-                if width > MAX_IMAGE_HEIGHT or height > MAX_IMAGE_HEIGHT:
-                    image = resize_image(image, MAX_IMAGE_HEIGHT)
-                    logger.info(f"Image resized to {image.size[0]}x{image.size[1]}")
-                    await message.channel.send(
-                        f"Image is too large, resizing. Optimal dimensions are {MAX_IMAGE_HEIGHT}x{MAX_IMAGE_HEIGHT}."
-                    )
-
+                image = resize_image(image, MAX_IMAGE_HEIGHT)
+                logger.info(f"Image resized to {image.size[0]}x{image.size[1]}")
+                await message.channel.send(f"Image resizing...")
                 image = convert_to_png(image)
                 output = BytesIO()
                 image.save(output, format="PNG")
@@ -222,12 +218,23 @@ def save_image_to_input_dir(image_data):
 def resize_image(image, max_size):
     """Resize the image proportionally to fit within max_size."""
     width, height = image.size
-    if width > height:
-        new_width = max_size
-        new_height = int((height / width) * max_size)
+
+    # Ensure the image is scaled up if either dimension is smaller than 1024
+    if width < 1024 and height < 1024:
+        if width > height:
+            new_width = 1024
+            new_height = int((height / width) * 1024)
+        else:
+            new_height = 1024
+            new_width = int((width / height) * 1024)
     else:
-        new_height = max_size
-        new_width = int((width / height) * max_size)
+        if width > height:
+            new_width = max_size
+            new_height = int((height / width) * max_size)
+        else:
+            new_height = max_size
+            new_width = int((width / height) * max_size)
+
     return image.resize((new_width, new_height))
 
 
