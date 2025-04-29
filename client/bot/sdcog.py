@@ -29,16 +29,6 @@ INPUT_IMAGE_DIR.mkdir(exist_ok=True)
 
 MAX_IMAGE_HEIGHT = 1024
 
-
-def save_image_to_input_dir(image_data):
-    with tempfile.NamedTemporaryFile(
-        dir=INPUT_IMAGE_DIR, suffix=".png", delete=False
-    ) as tmp_file:
-        tmp_file.write(image_data)
-        file_path = Path(tmp_file.name)
-    return (file_path, tmp_file.name)
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -84,10 +74,17 @@ class ImageGen(commands.Cog):
                 logger.info(f"Image dimensions: {width}x{height}")
 
                 if width > MAX_IMAGE_HEIGHT or height > MAX_IMAGE_HEIGHT:
+                    image = resize_image(image, MAX_IMAGE_HEIGHT)
+                    logger.info(f"Image resized to {image.size[0]}x{image.size[1]}")
                     await message.channel.send(
-                        f"Image is too large. Maximum allowed dimensions are {MAX_IMAGE_HEIGHT}x{MAX_IMAGE_HEIGHT}."
+                        f"Image is too large, resizing. Optimal dimensions are {MAX_IMAGE_HEIGHT}x{MAX_IMAGE_HEIGHT}."
                     )
-                    return
+
+                image = convert_to_png(image)
+                output = BytesIO()
+                image.save(output, format="PNG")
+                image_data = output.getvalue()
+                output.close()
 
                 file_path, file_name = save_image_to_input_dir(image_data)
                 logger.info(f"Image saved to {file_path}")
@@ -211,6 +208,37 @@ class ImageGen(commands.Cog):
                 await ctx.send("Image file not found (even though path was generated).")
         else:
             await ctx.send(f"No images found in the '{SPACK_DIR}' directory.")
+
+
+def save_image_to_input_dir(image_data):
+    with tempfile.NamedTemporaryFile(
+        dir=INPUT_IMAGE_DIR, suffix=".png", delete=False
+    ) as tmp_file:
+        tmp_file.write(image_data)
+        file_path = Path(tmp_file.name)
+    return (file_path, tmp_file.name)
+
+
+def resize_image(image, max_size):
+    """Resize the image proportionally to fit within max_size."""
+    width, height = image.size
+    if width > height:
+        new_width = max_size
+        new_height = int((height / width) * max_size)
+    else:
+        new_height = max_size
+        new_width = int((width / height) * max_size)
+    return image.resize((new_width, new_height))
+
+
+def convert_to_png(image):
+    """Convert the image to PNG format."""
+    if image.format != "PNG":
+        output = BytesIO()
+        image.save(output, format="PNG")
+        output.seek(0)
+        return Image.open(output)
+    return image
 
 
 def generate_random_seed() -> int:
