@@ -117,6 +117,7 @@ class ImageGen(commands.Cog):
                                     BytesIO(image_data), filename="output.png"
                                 )
                                 await reaction.message.channel.send(file=file)
+                                await message.channel.send(f"Done processing ...")
                     except Exception as e:
                         logger.info(f"Error while processing the image: {e}")
             except Exception as e:
