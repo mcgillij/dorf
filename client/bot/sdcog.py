@@ -39,83 +39,94 @@ class ImageGen(commands.Cog):
         self.client_id = str(uuid.uuid4())
         self.emoji = "🎨"
         self.photo_emoji = "📷"
+        # queue for reaction / image -> image
+        self.reaction_queue = asyncio.Queue()  # In-memory queue
+        self.processing_task = self.bot.loop.create_task(self.process_queue())
+        # spack queue
+        self.image_queue = asyncio.Queue()  # In-memory queue for image generation
+        self.image_processing_task = self.bot.loop.create_task(
+            self.process_image_queue()
+        )
 
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
-        logger.info(f"str emoji {str(reaction.emoji)}")
-        logger.info(f"Reaction added by {user}: {reaction.emoji}")
         if user.bot:
             return  # Ignore bot reactions
-        logger.info(f"Reaction: {reaction.message}")
+
         if str(reaction.emoji) not in [str(self.emoji), str(self.photo_emoji)]:
-            logger.info(f"Reaction: {reaction.emoji} is not a {self.emoji}")
             return
 
-        photo = False
-        if reaction.emoji == self.photo_emoji:
-            photo = True
-
+        photo = reaction.emoji == self.photo_emoji
         message = reaction.message
+
         if message.attachments:
-            logger.info(f"Attachment found in message: {message.attachments[0].url}")
             attachment_url = message.attachments[0].url
+            await self.reaction_queue.put((attachment_url, message, photo))
+            logger.info("Reaction added to queue.")
 
+    async def process_queue(self):
+        while True:
+            attachment_url, message, photo = await self.reaction_queue.get()
             try:
-                # Fetch the image
-                headers = {"User-Agent": "Mozilla/5.0"}
-                file_request = urllib.request.Request(attachment_url, headers=headers)
-
-                # Fetch the image
-                with urllib.request.urlopen(file_request) as response:
-                    image_data = response.read()
-
-                image = Image.open(BytesIO(image_data))
-                width, height = image.size
-                logger.info(f"Image dimensions: {width}x{height}")
-
-                image = resize_image(image, MAX_IMAGE_HEIGHT)
-                logger.info(f"Image resized to {image.size[0]}x{image.size[1]}")
-                await message.channel.send(f"Image resizing...")
-                image = convert_to_png(image)
-                output = BytesIO()
-                image.save(output, format="PNG")
-                image_data = output.getvalue()
-                output.close()
-
-                file_path, file_name = save_image_to_input_dir(image_data)
-                logger.info(f"Image saved to {file_path}")
-                await message.channel.send(f"Image processing ...")
-                async with reaction.message.channel.typing():
-                    try:
-                        with open("input_spack.json", "r") as f:
-                            prompt = json.load(f)
-                            prompt["2"]["inputs"]["image"] = file_name
-                            prompt["5"]["inputs"]["seed"] = generate_random_seed()
-                            prompt["5"]["inputs"]["steps"] = get_random_steps()
-                            if photo:
-                                prompt["5"]["inputs"]["denoise"] = 0.4000000000000001
-                            prompt["5"]["inputs"]["cfg"] = get_random_cfg()
-                            prompt["5"]["inputs"]["sampler_name"] = get_random_sampler()
-                            if photo:
-                                prompt["3"]["inputs"][
-                                    "text"
-                                ] = "Hot anime version of the people in the image already, masterpiece, best quality, amazing quality"
-                            else:
-                                prompt["3"]["inputs"]["text"] = get_random_prompt()
-
-                        images = await asyncio.to_thread(self.get_images, prompt)
-                        for node_id, image_datas in images.items():
-                            for image_data in image_datas:
-                                file = discord.File(
-                                    BytesIO(image_data), filename="output.png"
-                                )
-                                await reaction.message.channel.send(file=file)
-                                await message.channel.send(f"Done processing ...")
-                    except Exception as e:
-                        logger.info(f"Error while processing the image: {e}")
+                await self.process_reaction(attachment_url, message, photo)
             except Exception as e:
-                logger.error(f"Failed to process the image: {e}")
-                await message.channel.send("Failed to process the image.")
+                logger.error(f"Error processing reaction: {e}")
+            finally:
+                self.reaction_queue.task_done()
+
+    async def process_reaction(self, attachment_url, message, photo):
+        try:
+            image_data = await self.fetch_image(attachment_url)
+            image = self.process_image(image_data)
+            file_path, file_name = save_image_to_input_dir(image)
+            await self.generate_and_send_images(file_name, message, photo)
+        except Exception as e:
+            logger.error(f"Failed to process the image: {e}")
+            await message.channel.send("Failed to process the image.")
+
+    async def fetch_image(self, url):
+        headers = {"User-Agent": "Mozilla/5.0"}
+        file_request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(file_request) as response:
+            return response.read()
+
+    def process_image(self, image_data):
+        image = Image.open(BytesIO(image_data))
+        image = resize_image(image, MAX_IMAGE_HEIGHT)
+        image = convert_to_png(image)
+        output = BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+    async def generate_and_send_images(self, file_name, message, photo):
+        try:
+            with open("input_spack.json", "r") as f:
+                prompt = json.load(f)
+                self.update_prompt(prompt, file_name, photo)
+
+            images = await asyncio.to_thread(self.get_images, prompt)
+            for image_datas in images.values():
+                for image_data in image_datas:
+                    file = discord.File(BytesIO(image_data), filename="output.png")
+                    await message.channel.send(file=file)
+            await message.channel.send("Done processing ...")
+        except Exception as e:
+            logger.info(f"Error while processing the image: {e}")
+
+    def update_prompt(self, prompt, file_name, photo):
+        prompt["2"]["inputs"]["image"] = file_name
+        prompt["5"]["inputs"]["seed"] = generate_random_seed()
+        prompt["5"]["inputs"]["steps"] = get_random_steps()
+        prompt["5"]["inputs"]["cfg"] = get_random_cfg()
+        prompt["5"]["inputs"]["sampler_name"] = get_random_sampler()
+        if photo:
+            prompt["5"]["inputs"]["denoise"] = 0.4000000000000001
+            prompt["3"]["inputs"]["text"] = (
+                "Hot anime version of the people in the image already, masterpiece, "
+                "best quality, amazing quality"
+            )
+        else:
+            prompt["3"]["inputs"]["text"] = get_random_prompt()
 
     def queue_prompt(self, prompt):
         p = {"prompt": prompt, "client_id": self.client_id}
@@ -172,6 +183,20 @@ class ImageGen(commands.Cog):
     @commands.command(name="spack", aliases=["", "gi"])
     async def generate_image(self, ctx):
         """Generates an image from war_waifus.json"""
+        await self.image_queue.put(ctx)
+        await ctx.send("Your request has been added to the queue. Please wait...")
+
+    async def process_image_queue(self):
+        while True:
+            ctx = await self.image_queue.get()
+            try:
+                await self.process_image_request(ctx)
+            except Exception as e:
+                logger.error(f"Error processing image request: {e}")
+            finally:
+                self.image_queue.task_done()
+
+    async def process_image_request(self, ctx):
         async with ctx.typing():
             try:
                 with open("war_waifus.json", "r") as f:
@@ -184,11 +209,12 @@ class ImageGen(commands.Cog):
                     prompt["6"]["inputs"]["text"] = get_random_prompt()
 
                 images = await asyncio.to_thread(self.get_images, prompt)
-                for node_id, image_datas in images.items():
+                for image_datas in images.values():
                     for image_data in image_datas:
                         file = discord.File(BytesIO(image_data), filename="output.png")
                         await ctx.send(file=file)
             except Exception as e:
+                logger.error(f"Error generating image: {e}")
                 await self.spack_old(ctx)
 
     async def spack_old(self, ctx):
