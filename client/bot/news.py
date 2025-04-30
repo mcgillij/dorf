@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands, tasks
 from bot.tools.searxng_search import search_source
 from bot.constants import NEWS_DB
+from bot.config import CHAT_CHANNEL_ID
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,8 @@ class NewsAgent(commands.Cog):
 
         async def task_runner():
             while True:
-                print(f"Running task: {task_name}")
-                await asyncio.sleep(interval * 60)  # Simulate task execution
+                await self.execute_task_logic(task_id, task_name)
+                await asyncio.sleep(interval * 60)  # Wait for the next interval
 
         # Start the task and store it in the running_tasks dictionary
         task = asyncio.create_task(task_runner())
@@ -80,10 +81,81 @@ class NewsAgent(commands.Cog):
             del self.running_tasks[task_id]
             self.update_task(task_id, status="stopped")
 
+    async def execute_task_logic(self, task_id: int, task_name: str):
+        """Execute the logic for a scheduled task."""
+        logger.info(f"Executing task {task_name} (ID: {task_id})")
+        cursor = self.db.cursor()
+        cursor.execute(
+            "SELECT user_id FROM scheduled_tasks WHERE id = ?",
+            (task_id,),
+        )
+        user_id_row = cursor.fetchone()
+
+        if not user_id_row:
+            logger.warning(f"No user found for task {task_name} (ID: {task_id}).")
+            return
+
+        user_id = user_id_row[0]
+
+        # Fetch preferences
+        cursor.execute(
+            "SELECT topic, source FROM preferences WHERE user_id = ?",
+            (user_id,),
+        )
+        preferences = cursor.fetchall()
+
+        if not preferences:
+            logger.warning(
+                f"No preferences found for task {task_name} (ID: {task_id})."
+            )
+            return
+
+        # Fetch updates from sources
+        results = []
+        for topic, source in preferences:
+            try:
+                results.extend(await search_source(source, topic))
+            except Exception as e:
+                logger.error(
+                    f"Error fetching updates for topic '{topic}' from source '{source}': {e}"
+                )
+
+        # Fetch weather data
+        try:
+            weather_embed = await self.fetch_weather_embed(user_id)
+            weather_response = f"\n\nWeather updates:\n{weather_embed.title}\n{weather_embed.description}"
+        except ValueError as e:
+            weather_response = f"\n\nWeather updates: {str(e)}"
+        except Exception:
+            weather_response = "\n\nWeather updates: Failed to fetch weather data."
+
+        # Prepare response
+        if results:
+            response = "\n".join(
+                [f"**{res['title']}**: {res['url']}" for res in results[:5]]
+            )
+        else:
+            response = f"No updates found for task '{task_name}'."
+
+        response += weather_response
+
+        # Notify the channel via Discord
+        channel = self.bot.get_channel(CHAT_CHANNEL_ID)
+        if channel:
+            try:
+                await channel.send(f"Updates for task '{task_name}':\n{response}")
+            except Exception as e:
+                logger.error(
+                    f"Failed to send updates to channel {CHAT_CHANNEL_ID}: {e}"
+                )
+        else:
+            logger.error(f"Channel with ID {CHAT_CHANNEL_ID} not found.")
+
     @tasks.loop(minutes=5)
     async def check_tasks(self):
         """Check the database for scheduled tasks and ensure they are running."""
-        cursor = self.bot.get_cog("NewsAgent").db.cursor()
+        logger.info("checking for task")
+        cursor = self.db.cursor()
         cursor.execute("SELECT id, task_name, interval, status FROM scheduled_tasks")
         scheduled_tasks = cursor.fetchall()
 
@@ -138,7 +210,27 @@ class NewsAgent(commands.Cog):
 
     @commands.command(name="add_task")
     async def add_task_command(self, ctx, task_name: str, interval: int):
-        """Add a new scheduled task."""
+        """Add a new scheduled task to the database."""
+        user_id = ctx.author.id
+        cursor = self.db.cursor()
+
+        # Check if the user has preferences or location set
+        cursor.execute(
+            "SELECT 1 FROM users WHERE user_id = ? AND location IS NOT NULL AND country IS NOT NULL",
+            (user_id,),
+        )
+        user_has_location = cursor.fetchone()
+
+        cursor.execute(
+            "SELECT 1 FROM preferences WHERE user_id = ? LIMIT 1", (user_id,)
+        )
+        user_has_preferences = cursor.fetchone()
+
+        if not user_has_location and not user_has_preferences:
+            raise ValueError(
+                "Cannot add a task without user preferences or location set."
+            )
+
         self.add_task(task_name, interval)
         await ctx.send(
             f"Task '{task_name}' added with an interval of {interval} minutes."
@@ -253,19 +345,6 @@ class NewsAgent(commands.Cog):
 
         await ctx.send(response)
 
-    # @commands.command(name="search_news")
-    # async def search_news(self, ctx, query: str):
-    # """Search for news articles based on a query."""
-    # await ctx.send(f"Searching for news on: {query}")
-    # results = await search_source(query)
-
-    # if results:
-    # response = "\n".join([f"**{res['title']}**: {res['url']}" for res in results[:5]])
-    # else:
-    # response = "No results found."
-
-    # await ctx.send(response)
-
     @commands.command(name="update_location")
     async def update_location(self, ctx, location: str, country: str):
         """Update the user's location."""
@@ -290,6 +369,16 @@ class NewsAgent(commands.Cog):
     async def get_weather(self, ctx):
         """Fetch the weather based on the user's location."""
         user_id = ctx.author.id
+        try:
+            weather_embed = await self.fetch_weather_embed(user_id)
+            await ctx.send(embed=weather_embed)
+        except ValueError as e:
+            await ctx.send(str(e))
+        except Exception:
+            await ctx.send("Failed to fetch weather data. Please try again later.")
+
+    async def fetch_weather_embed(self, user_id: int) -> discord.Embed:
+        """Fetch weather data and return a Discord embed."""
         cursor = self.db.cursor()
         cursor.execute(
             "SELECT location, country FROM users WHERE user_id = ?", (user_id,)
@@ -297,10 +386,9 @@ class NewsAgent(commands.Cog):
         result = cursor.fetchone()
 
         if not result or not result[0]:
-            await ctx.send(
+            raise ValueError(
                 "You need to set your location first using the `update_location` command."
             )
-            return
 
         location, country = result
         async with aiohttp.ClientSession() as session:
@@ -308,10 +396,7 @@ class NewsAgent(commands.Cog):
                 f"https://wttr.in/{location} {country}?format=j1"
             ) as response:
                 if response.status != 200:
-                    await ctx.send(
-                        "Failed to fetch weather data. Please try again later."
-                    )
-                    return
+                    raise Exception("Failed to fetch weather data.")
 
                 weather_data = await response.json()
                 current = weather_data["current_condition"][0]
@@ -348,7 +433,7 @@ class NewsAgent(commands.Cog):
                 )
                 embed.set_footer(text=f"Last updated: {current['localObsDateTime']}")
 
-                await ctx.send(embed=embed)
+                return embed
 
 
 async def setup(bot):
