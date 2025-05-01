@@ -17,7 +17,7 @@ async def wrap_model(model, query, on_message=None, callback=None) -> str:
     logger.info("in the wrapper")
     loop = asyncio.get_event_loop()
     chat = lms.Chat(
-        "You summarize the most relevant context information based on the query"
+        "You summarize the most relevant context information based on the query, bullet points are preferred. no preamble / notes",
     )
     chat.add_user_message(query)
     result = await loop.run_in_executor(
@@ -61,6 +61,22 @@ async def wrap_model_act(model, query, tools, on_message=None, callback=None) ->
 
     logger.info(f"********************** {parsed_result=}")
     return parsed_result
+
+
+async def summarize(query: str, callback) -> str:
+    """summarize"""
+    model = lms.llm()  # load model
+    logger.info("model loaded")
+
+    response = await wrap_model(
+        model,
+        query,
+        # callback=callback,
+    )
+    content = extract_content(response)
+    logger.info(f"********************************  Content: {content}")
+    logger.info(f"********************************  Response: {response}")
+    return content
 
 
 async def search_with_tool(query: str, callback) -> str:
