@@ -1,6 +1,4 @@
 import logging
-import os
-from random import choice
 
 import dice
 import discord
@@ -16,6 +14,15 @@ from bot.constants import (
 class MiscCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.bot.launch_time = discord.utils.utcnow()
+
+    @commands.command()
+    async def uptime(self, ctx):
+        """Displays the bot's uptime."""
+        delta_uptime = discord.utils.utcnow() - self.bot.launch_time
+        hours, remainder = divmod(int(delta_uptime.total_seconds()), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        await ctx.send(f"Uptime: {hours}h {minutes}m {seconds}s")
 
     @commands.command()
     async def check_bots(self, ctx):

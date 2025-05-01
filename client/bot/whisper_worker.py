@@ -3,7 +3,7 @@ import re
 import json
 from random import randint
 import logging
-import asyncio  # Ensure you have this imported for running async code
+import asyncio
 import aiohttp
 from db import SQLiteDB
 from bot.redis_client import redis_client
@@ -17,7 +17,7 @@ nic_bot_name_pattern = re.compile(r"\b(nic|nick|nicole|nikky|nik)\b", re.IGNOREC
 
 # Initialize the database
 db = SQLiteDB()
-db.create_table()  # Create table if it doesn't exist
+db.create_table()
 
 
 class WhisperClient:
