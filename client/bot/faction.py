@@ -482,7 +482,7 @@ class FactionCog(commands.Cog):
         medals = ["🥇", "🥈", "🥉"]
         for idx, (name, symbol, score) in enumerate(faction_rows[:3]):
             medal = medals[idx] if idx < len(medals) else ""
-            top_factions += f"{medal} {symbol} **{name}** - {score:,} points\n"
+            top_factions += f"{medal} {symbol} **{name}** - {score or 0:,} points\n"
         embed.add_field(name="🏅 Top Factions", value=top_factions, inline=False)
 
         # Time remaining
@@ -537,8 +537,45 @@ class FactionCog(commands.Cog):
                 return
             start_time = datetime.fromisoformat(result[0]).replace(tzinfo=timezone.utc)
             if datetime.now(timezone.utc) - start_time >= timedelta(weeks=1):
-                c.execute("SELECT * FROM faction_scores")
+                # Fetch faction scores
+                c.execute(
+                    """
+                    SELECT factions.name, factions.symbol, SUM(faction_scores.usage_count) as score
+                    FROM factions
+                    LEFT JOIN faction_scores ON factions.id = faction_scores.faction_id
+                    GROUP BY factions.id
+                    ORDER BY score DESC
+                    """
+                )
                 scores = c.fetchall()
+
+                # Prepare the announcement message
+                if scores:
+                    winner_name, winner_symbol, winner_score = scores[0]
+                    message = (
+                        f":trophy: The emoji war has ended!\n\n"
+                        f"🏆 **Winner:** {winner_symbol} **{winner_name}** with **{winner_score:,}** points!\n\n"
+                        f"📊 **Final Standings:**\n"
+                    )
+                    medals = ["🥇", "🥈", "🥉"]
+                    for idx, (name, symbol, score) in enumerate(scores[:3]):
+                        medal = medals[idx] if idx < len(medals) else ""
+                        message += (
+                            f"{medal} {symbol} **{name}** - {score or 0:,} points\n"
+                        )
+                else:
+                    message = (
+                        ":trophy: The emoji war has ended, but no scores were recorded!"
+                    )
+
+                # Send the announcement
+                channel = discord.utils.get(
+                    self.bot.get_all_channels(), name="bot-spam"
+                )
+                if channel:
+                    await channel.send(message)
+
+                # Archive scores and reset war state
                 for faction_id, emoji, count, _ in scores:
                     c.execute(
                         "INSERT INTO war_history (faction_id, emoji, usage_count, ended_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
@@ -547,12 +584,45 @@ class FactionCog(commands.Cog):
                 c.execute("DELETE FROM faction_scores")
                 c.execute("UPDATE war_state SET started_at = NULL WHERE id = 1")
                 conn.commit()
+                await self.reset_factions()
 
-                channel = discord.utils.get(self.bot.get_all_channels(), name="general")
-                if channel:
-                    await channel.send(
-                        ":trophy: The emoji war has ended! Scores have been archived."
-                    )
+    async def reset_factions(self):
+        with sqlite3.connect(FACTION_DB) as conn:
+            c = conn.cursor()
+            # Clear faction scores
+            c.execute("DELETE FROM faction_scores")
+            # Clear factions
+            c.execute("DELETE FROM factions")
+            conn.commit()
+
+        return "All factions and scores have been reset. Ready for the next war!"
+
+    @commands.command(name="war_history")
+    async def show_war_history(self, ctx):
+        """Displays the results of past wars from the war_history table."""
+        with sqlite3.connect(FACTION_DB) as conn:
+            c = conn.cursor()
+            c.execute(
+                """
+                SELECT factions.name, factions.symbol, COALESCE(SUM(war_history.usage_count), 0) as score
+                FROM factions
+                LEFT JOIN war_history ON factions.id = war_history.faction_id
+                GROUP BY factions.id
+                ORDER BY score DESC
+                """
+            )
+            results = c.fetchall()
+
+        if not results:
+            await ctx.send("No war history available.")
+            return
+
+        report = ":scroll: **War History**\n\n"
+        for name, symbol, score in results:
+            report += f"**{name}** ({symbol}):\n"
+            report += f"  Total Score - {score:,} points\n\n"
+
+        await ctx.send(report)
 
 
 async def setup(bot):
