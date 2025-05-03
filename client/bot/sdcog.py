@@ -27,7 +27,16 @@ from bot.utilities import get_random_image_path
 INPUT_IMAGE_DIR = Path("/home/j/ComfyUI/input")
 INPUT_IMAGE_DIR.mkdir(exist_ok=True)
 
+WAIFU_PROMPTS = "waifu_prompts.json"
+_cached_prompts = ""
+QUALITY_PROMPT_SUFFIX = ["masterpiece", "best quality", "amazing quality"]
 MAX_IMAGE_HEIGHT = 1024
+
+YARA_PROMPT = "dndchars/yara.json"
+ALVYS_PROMPT = "dndchars/alvys.json"
+CRUMB_PROMPT = "dndchars/crumb.json"
+HALBERD_PROMPT = "dndchars/halberd.json"
+IANCAN_PROMPT = "dndchars/iancan.json"
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +53,12 @@ class ImageGen(commands.Cog):
         self.processing_task = self.bot.loop.create_task(self.process_queue())
         # spack queue
         self.image_queue = asyncio.Queue()  # In-memory queue for image generation
+        self.dnd_image_queue = asyncio.Queue()  # In-memory queue for image generation
         self.image_processing_task = self.bot.loop.create_task(
             self.process_image_queue()
+        )
+        self.dnd_image_processing_task = self.bot.loop.create_task(
+            self.process_dnd_image_queue()
         )
 
     @commands.Cog.listener()
@@ -126,7 +139,9 @@ class ImageGen(commands.Cog):
                 "best quality, amazing quality"
             )
         else:
-            prompt["3"]["inputs"]["text"] = get_random_prompt()
+            prompt["3"]["inputs"]["text"] = get_random_prompt() + ",".join(
+                QUALITY_PROMPT_SUFFIX
+            )
 
     def queue_prompt(self, prompt):
         p = {"prompt": prompt, "client_id": self.client_id}
@@ -186,6 +201,28 @@ class ImageGen(commands.Cog):
         await self.image_queue.put(ctx)
         await ctx.send("Your request has been added to the queue. Please wait...")
 
+    @commands.command(name="dnd", aliases=["d"])
+    async def generate_dnd_image(self, ctx, character: str):
+        """Generates an image from war_waifus.json"""
+        if character.lower() not in ["alvys", "iancan", "crumb", "halberd", "yara"]:
+            await ctx.send(
+                "character must be one of: alvys, iancan, crumb, halberd, yara"
+            )
+            return
+
+        await self.dnd_image_queue.put((ctx, character))
+        await ctx.send("Your request has been added to the queue. Please wait...")
+
+    async def process_dnd_image_queue(self):
+        while True:
+            ctx, character = await self.dnd_image_queue.get()
+            try:
+                await self.process_dnd_image_request(ctx, character)
+            except Exception as e:
+                logger.error(f"Error processing image request: {e}")
+            finally:
+                self.dnd_image_queue.task_done()
+
     async def process_image_queue(self):
         while True:
             ctx = await self.image_queue.get()
@@ -195,6 +232,44 @@ class ImageGen(commands.Cog):
                 logger.error(f"Error processing image request: {e}")
             finally:
                 self.image_queue.task_done()
+
+    async def process_dnd_image_request(self, ctx, character):
+        async with ctx.typing():
+            logger.info(f"Processing DnD image request for character: {character}")
+            character_prompt = None
+            match character.lower():
+                case "alvys":
+                    character_prompt = ALVYS_PROMPT
+                case "iancan":
+                    character_prompt = IANCAN_PROMPT
+                case "crumb":
+                    character_prompt = CRUMB_PROMPT
+                case "halberd":
+                    character_prompt = HALBERD_PROMPT
+                case "yara":
+                    character_prompt = YARA_PROMPT
+            logger.info(f"Character prompt: {character_prompt}")
+            dnd_char_prompt = get_character_prompt(character_prompt)
+            logger.info(f"Character prompt: {dnd_char_prompt}")
+            try:
+                with open("war_waifus.json", "r") as f:
+                    prompt = json.load(f)
+
+                    prompt["3"]["inputs"]["seed"] = generate_random_seed()
+                    prompt["3"]["inputs"]["steps"] = get_random_steps()
+                    prompt["3"]["inputs"]["cfg"] = get_random_cfg()
+                    prompt["3"]["inputs"]["sampler_name"] = get_random_sampler()
+                    prompt["6"]["inputs"]["text"] = dnd_char_prompt + ",".join(
+                        QUALITY_PROMPT_SUFFIX
+                    )
+
+                images = await asyncio.to_thread(self.get_images, prompt)
+                for image_datas in images.values():
+                    for image_data in image_datas:
+                        file = discord.File(BytesIO(image_data), filename="output.png")
+                        await ctx.send(file=file)
+            except Exception as e:
+                logger.error(f"Error generating image: {e}")
 
     async def process_image_request(self, ctx):
         async with ctx.typing():
@@ -206,7 +281,9 @@ class ImageGen(commands.Cog):
                     prompt["3"]["inputs"]["steps"] = get_random_steps()
                     prompt["3"]["inputs"]["cfg"] = get_random_cfg()
                     prompt["3"]["inputs"]["sampler_name"] = get_random_sampler()
-                    prompt["6"]["inputs"]["text"] = get_random_prompt()
+                    prompt["6"]["inputs"]["text"] = get_random_prompt() + ",".join(
+                        QUALITY_PROMPT_SUFFIX
+                    )
 
                 images = await asyncio.to_thread(self.get_images, prompt)
                 for image_datas in images.values():
@@ -292,19 +369,21 @@ def get_random_cfg() -> float:
     return random.uniform(5.0, 7.0)
 
 
+def load_prompts() -> None:
+    global _cached_prompts
+    with open(WAIFU_PROMPTS, "r") as file:
+        _cached_prompts = json.load(file)
+
+
+def get_character_prompt(prompt_file) -> str:
+    with open(prompt_file, "r") as file:
+        return random.choice(json.load(file))
+
+
 def get_random_prompt() -> str:
-    prompts = [
-        "Hot Waifu's in warhammer 40k power armor, large breasts in bikini top,masterpiece,best quality,amazing quality",
-        "Hot warhammer 40k succubus, large breasts in bikini top,masterpiece,best quality,amazing quality",
-        "Hot warhammer 40k Daughters of the Emperor, large breasts in bikini top,masterpiece,best quality,amazing quality",
-        "Hot warhammer 40k Adepta Sororitas, large breasts in bikini top,masterpiece,best quality,amazing quality",
-        "Hot warhammer 40k Sisters of Battle, large breasts in bikini top,masterpiece,best quality,amazing quality",
-        "Hot warhammer 40k Sisters of Silence, large breasts in bikini top,masterpiece,best quality,amazing quality",
-        "Hot warhammer 40k Silent Sisterhood, large breasts in bikini top,masterpiece,best quality,amazing quality",
-        "Hot warhammer 40k Null Maidens, large breasts in bikini top,masterpiece,best quality,amazing quality",
-        "Hot warhammer 40k Daughtes of the Abyss, large breasts in bikini top,masterpiece,best quality,amazing quality",
-    ]
-    return random.choice(prompts)
+    if not _cached_prompts:
+        load_prompts()
+    return random.choice(_cached_prompts)
 
 
 async def setup(bot):
