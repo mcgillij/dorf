@@ -5,6 +5,7 @@ import logging
 from io import BytesIO
 from pathlib import Path
 import tempfile
+from typing import List, Dict
 
 import asyncio
 
@@ -32,6 +33,8 @@ _cached_prompts = ""
 QUALITY_PROMPT_SUFFIX = ["masterpiece", "best quality", "amazing quality"]
 MAX_IMAGE_HEIGHT = 1024
 
+
+CHECKPOINTS_FILE = "checkpoints.json"
 YARA_PROMPT = "dndchars/yara.json"
 ALVYS_PROMPT = "dndchars/alvys.json"
 CRUMB_PROMPT = "dndchars/crumb.json"
@@ -135,8 +138,8 @@ class ImageGen(commands.Cog):
         if photo:
             prompt["5"]["inputs"]["denoise"] = 0.4000000000000001
             prompt["3"]["inputs"]["text"] = (
-                "Hot anime version of the people in the image already, masterpiece, "
-                "best quality, amazing quality"
+                "Hot anime version of the people in the image"
+                + ",".join(QUALITY_PROMPT_SUFFIX)
             )
         else:
             prompt["3"]["inputs"]["text"] = get_random_prompt() + ",".join(
@@ -203,7 +206,7 @@ class ImageGen(commands.Cog):
 
     @commands.command(name="dnd", aliases=["d"])
     async def generate_dnd_image(self, ctx, character: str):
-        """Generates an image from war_waifus.json"""
+        """Generates an image for dnd characters"""
         if character.lower() not in ["alvys", "iancan", "crumb", "halberd", "yara"]:
             await ctx.send(
                 "character must be one of: alvys, iancan, crumb, halberd, yara"
@@ -255,10 +258,19 @@ class ImageGen(commands.Cog):
                 with open("war_waifus.json", "r") as f:
                     prompt = json.load(f)
 
+                    checkpoint = get_random_checkpoints()
+                    ckpt_name, ckpt_data = next(iter(checkpoint.items()))
+                    prompt["4"]["inputs"]["ckpt_name"] = ckpt_name
                     prompt["3"]["inputs"]["seed"] = generate_random_seed()
-                    prompt["3"]["inputs"]["steps"] = get_random_steps()
-                    prompt["3"]["inputs"]["cfg"] = get_random_cfg()
-                    prompt["3"]["inputs"]["sampler_name"] = get_random_sampler()
+                    prompt["3"]["inputs"]["steps"] = get_random_steps(
+                        min(ckpt_data["steps"]), max(ckpt_data["steps"])
+                    )
+                    prompt["3"]["inputs"]["cfg"] = get_random_cfg(
+                        min(ckpt_data["cfg"]), max(ckpt_data["cfg"])
+                    )
+                    prompt["3"]["inputs"]["sampler_name"] = get_random_sampler(
+                        ckpt_data["samplers"]
+                    )
                     prompt["6"]["inputs"]["text"] = dnd_char_prompt + ",".join(
                         QUALITY_PROMPT_SUFFIX
                     )
@@ -276,11 +288,19 @@ class ImageGen(commands.Cog):
             try:
                 with open("war_waifus.json", "r") as f:
                     prompt = json.load(f)
-
+                    checkpoint = get_random_checkpoints()
+                    ckpt_name, ckpt_data = next(iter(checkpoint.items()))
+                    prompt["4"]["inputs"]["ckpt_name"] = ckpt_name
                     prompt["3"]["inputs"]["seed"] = generate_random_seed()
-                    prompt["3"]["inputs"]["steps"] = get_random_steps()
-                    prompt["3"]["inputs"]["cfg"] = get_random_cfg()
-                    prompt["3"]["inputs"]["sampler_name"] = get_random_sampler()
+                    prompt["3"]["inputs"]["steps"] = get_random_steps(
+                        min(ckpt_data["steps"]), max(ckpt_data["steps"])
+                    )
+                    prompt["3"]["inputs"]["cfg"] = get_random_cfg(
+                        min(ckpt_data["cfg"]), max(ckpt_data["cfg"])
+                    )
+                    prompt["3"]["inputs"]["sampler_name"] = get_random_sampler(
+                        ckpt_data["samplers"]
+                    )
                     prompt["6"]["inputs"]["text"] = get_random_prompt() + ",".join(
                         QUALITY_PROMPT_SUFFIX
                     )
@@ -355,18 +375,23 @@ def generate_random_seed() -> int:
     return random.randint(10**14, 10**15 - 1)
 
 
-def get_random_sampler() -> str:
-    return random.choice(
-        ["euler_ancestral", "euler", "euler_cfg_pp", "euler_ancestral_cfg_pp"]
-    )
+def get_random_sampler(
+    samplers: List = [
+        "euler_ancestral",
+        "euler",
+        "euler_cfg_pp",
+        "euler_ancestral_cfg_pp",
+    ]
+) -> str:
+    return random.choice(samplers)
 
 
-def get_random_steps() -> int:
-    return random.randint(16, 35)
+def get_random_steps(min: int = 16, max: int = 35) -> int:
+    return random.randint(min, max)
 
 
-def get_random_cfg() -> float:
-    return random.uniform(5.0, 7.0)
+def get_random_cfg(min: float = 5.0, max: float = 7.0) -> float:
+    return random.uniform(min, max)
 
 
 def load_prompts() -> None:
@@ -377,6 +402,11 @@ def load_prompts() -> None:
 
 def get_character_prompt(prompt_file) -> str:
     with open(prompt_file, "r") as file:
+        return random.choice(json.load(file))
+
+
+def get_random_checkpoints() -> Dict:
+    with open(CHECKPOINTS_FILE, "r") as file:
         return random.choice(json.load(file))
 
 
