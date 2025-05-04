@@ -44,8 +44,8 @@ async def process_response_queue(
             message = data["message"]
 
             # Extract the channel ID and user ID from the message
-            user_id, actual_message = message.split(":", 1)
-            user_id = int(user_id)
+            # user_id, actual_message = message.split(":", 1)
+            # user_id = int(user_id)
 
             # Define a fallback channel ID for automated responses
             fallback_channel_id = CHAT_CHANNEL_ID
@@ -55,11 +55,12 @@ async def process_response_queue(
             if not channel:
                 logger.info(f"Channel {fallback_channel_id} not found.")
                 continue
-            guild = channel.guild
+            # guild = channel.guild
 
             # Send the question the user asked back to the chat before processing response
-            for message_chunk in split_message(actual_message, 2000):
-                await channel.send(f"{guild.get_member(user_id)}: {message_chunk}")
+            for message_chunk in split_message(message, 2000):
+                await channel.send(f"{message_chunk}")
+                # await channel.send(f"{guild.get_member(user_id)}: {message_chunk}")
 
             # Call get_response
             response_from_llm = await bot_instance.llm.get_response(message)

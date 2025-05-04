@@ -92,7 +92,8 @@ class WhisperWorker:
                                 json.dumps(
                                     {
                                         "unique_id": str(unique_id),
-                                        "message": f"{user_id}: {text_response.strip()}",
+                                        "message": f"{text_response.strip()}",
+                                        # "message": f"{user_id}: {text_response.strip()}",
                                     }
                                 ),
                             )
@@ -108,7 +109,8 @@ class WhisperWorker:
                                 json.dumps(
                                     {
                                         "unique_id": str(unique_id),
-                                        "message": f"{user_id}: {text_response.strip()}",
+                                        "message": f"{text_response.strip()}",
+                                        # "message": f"{user_id}: {text_response.strip()}",
                                     }
                                 ),
                             )

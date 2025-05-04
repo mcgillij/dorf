@@ -55,17 +55,19 @@ def get_random_image_path(directory):
 
 async def replace_userids_with_username(ctx, text: str) -> str:
     logger.info("Replacing user IDs with usernames")
-    logger.debug(f"{text=}")
+    logger.debug(f"Original text: {text}")
 
     async def replace_match(match: re.Match) -> str:
         user_id = int(match.group(1))
-        # lookup the user id with the ctx to get the displayname
+        if ctx.guild is None:
+            logger.warning("Guild is None, cannot resolve user ID")
+            return f"@unknown-user"
+
         user = ctx.guild.get_member(user_id)
         if user:
-            username = user.display_name
-        else:
-            username = await sanitize_userid(user_id)
-        return username
+            return f"<@{user.id}>"  # Properly formatted Discord mention
+        logger.warning(f"User ID {user_id} not found in guild")
+        return f"@unknown-user"
 
     async def replace_pattern(pattern: str, text: str) -> str:
         matches = list(re.finditer(pattern, text))
@@ -86,12 +88,8 @@ async def replace_userids_with_username(ctx, text: str) -> str:
     for pattern in patterns:
         text = await replace_pattern(pattern, text)
 
-    logger.debug(f"{text=}")
+    logger.debug(f"Processed text: {text}")
     return text
-
-
-async def sanitize_userid(user_id: int):
-    return f"<@{user_id}>"
 
 
 def filter_message(message: str) -> bool:
