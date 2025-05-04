@@ -213,7 +213,7 @@ class ImageGen(commands.Cog):
                 logging.info("Waiting for WebSocket message...")
                 try:
                     out = await ws.recv()
-                    logging.info(f"Message received: {out}")
+                    # logging.info(f"Message received: {out}")
                 except websockets.exceptions.ConnectionClosedError as e:
                     logging.error(f"WebSocket connection closed: {e}")
                     raise
@@ -227,8 +227,7 @@ class ImageGen(commands.Cog):
                         logging.info(f"Executed node: {message['data']['node']}")
                         if "output" in message["data"]:
                             logging.debug(
-                                f"Output received: <data>"
-                                # f"Output received: {message['data']['output']}"
+                                f"Output received: {message['data']['output']}"
                             )
                     elif message["type"] == "execution_success":
                         logging.info("Execution success.")
@@ -271,26 +270,6 @@ class ImageGen(commands.Cog):
             return
         await self.unified_queue.put(("dnd", (ctx, character)))
         await ctx.send("Your request has been added to the queue. Please wait...")
-
-    # async def process_dnd_image_queue(self):
-    # while True:
-    # ctx, character = await self.dnd_image_queue.get()
-    # try:
-    # await self.process_dnd_image_request(ctx, character)
-    # except Exception as e:
-    # logger.error(f"Error processing image request: {e}")
-    # finally:
-    # self.dnd_image_queue.task_done()
-
-    # async def process_image_queue(self):
-    # while True:
-    # ctx = await self.image_queue.get()
-    # try:
-    # await self.process_image_request(ctx)
-    # except Exception as e:
-    # logger.error(f"Error processing image request: {e}")
-    # finally:
-    # self.image_queue.task_done()
 
     async def process_dnd_image_request(self, ctx, character):
         logger.info(
