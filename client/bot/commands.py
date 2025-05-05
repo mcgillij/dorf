@@ -44,6 +44,7 @@ INTENTS.polls = True
 INTENTS.presences = True
 INTENTS.reactions = True
 INTENTS.typing = True
+INTENTS.dm_messages = True
 
 
 class BaseBot(commands.Bot):

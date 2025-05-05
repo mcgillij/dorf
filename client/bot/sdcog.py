@@ -32,7 +32,7 @@ INPUT_IMAGE_DIR.mkdir(exist_ok=True)
 
 WAIFU_PROMPTS = "waifu_prompts.json"
 _cached_prompts = ""
-QUALITY_PROMPT_SUFFIX = ["masterpiece", "best quality", "amazing quality"]
+QUALITY_PROMPT_SUFFIX = [", masterpiece", "best quality", "amazing quality"]
 MAX_IMAGE_HEIGHT = 1024
 
 
@@ -63,14 +63,34 @@ class ImageGen(commands.Cog):
         )
 
     async def process_unified_queue(self):
+        logger.info("Processing unified queue...")
         while True:
             task_type, data = await self.unified_queue.get()
+            logger.info(f"Processing task of type: {task_type}")
             try:
                 if task_type == "spack":
                     await self.process_image_request(data)
                 elif task_type == "dnd":
                     ctx, character = data
                     await self.process_dnd_image_request(ctx, character)
+                elif task_type == "custom":
+                    logger.info(f"Processing custom image request")
+                    ctx = data["ctx"]
+                    image_data = data["image_data"]
+                    user_prompt = data["prompt"]
+                    logger.info(f"here is the prompt: {user_prompt}")
+
+                    # Process the image
+                    image = self.process_image(image_data)
+                    file_path, file_name = save_image_to_input_dir(image)
+                    # with open("input_spack.json", "r") as f:
+                    # prompt_data = json.load(f)
+                    # prompt_data["3"]["inputs"]["text"] = user_prompt
+                    # prompt_data["2"]["inputs"]["image"] = file_name
+                    logger.info(f"Here is ctx.message{ctx.message}")
+                    await self.generate_and_send_images(
+                        file_name, ctx.message, user_prompt=user_prompt, photo=False
+                    )
             except Exception as e:
                 logger.error(f"Error processing unified queue task: {e}")
             finally:
@@ -119,16 +139,6 @@ class ImageGen(commands.Cog):
         return await asyncio.to_thread(
             lambda: json.loads(urllib.request.urlopen(file_request).read())
         )
-        # with urllib.request.urlopen(file_request) as response:
-        # return response.read()
-
-    async def process_queues_sequentially(self):
-        while True:
-            if not self.image_queue.empty():
-                await self.process_image_queue()
-            elif not self.dnd_image_queue.empty():
-                await self.process_dnd_image_queue()
-            await asyncio.sleep(0.1)  # Prevent busy-waiting
 
     def process_image(self, image_data):
         image = Image.open(BytesIO(image_data))
@@ -138,11 +148,16 @@ class ImageGen(commands.Cog):
         image.save(output, format="PNG")
         return output.getvalue()
 
-    async def generate_and_send_images(self, file_name, message, photo):
+    async def generate_and_send_images(
+        self, file_name, message, user_prompt=None, photo=False
+    ):
+        logger.info(
+            f"Generating images for {file_name} with user prompt: {user_prompt}"
+        )
         try:
             with open("input_spack.json", "r") as f:
                 prompt = json.load(f)
-                self.update_prompt(prompt, file_name, photo)
+                self.update_prompt(prompt, file_name, user_prompt, photo)
 
             images = await self.get_images(prompt)
             for image_datas in images.values():
@@ -156,7 +171,7 @@ class ImageGen(commands.Cog):
         except Exception as e:
             logger.info(f"Error while processing the image: {e}")
 
-    def update_prompt(self, prompt, file_name, photo):
+    def update_prompt(self, prompt, file_name, user_prompt, photo):
         prompt["2"]["inputs"]["image"] = file_name
         prompt["5"]["inputs"]["seed"] = generate_random_seed()
         prompt["5"]["inputs"]["steps"] = get_random_steps()
@@ -164,14 +179,26 @@ class ImageGen(commands.Cog):
         prompt["5"]["inputs"]["sampler_name"] = get_random_sampler()
         if photo:
             prompt["5"]["inputs"]["denoise"] = 0.4000000000000001
-            prompt["3"]["inputs"]["text"] = (
-                "Hot anime version of the people in the image"
-                + ",".join(QUALITY_PROMPT_SUFFIX)
-            )
+            if user_prompt:
+                prompt["3"]["inputs"]["text"] = user_prompt + ",".join(
+                    QUALITY_PROMPT_SUFFIX
+                )
+
+            else:
+                prompt["3"]["inputs"]["text"] = (
+                    "Hot anime version of the people in the image"
+                    + ",".join(QUALITY_PROMPT_SUFFIX)
+                )
         else:
-            prompt["3"]["inputs"]["text"] = get_random_prompt() + ",".join(
-                QUALITY_PROMPT_SUFFIX
-            )
+            if user_prompt:
+                prompt["3"]["inputs"]["text"] = user_prompt + ",".join(
+                    QUALITY_PROMPT_SUFFIX
+                )
+            else:
+                prompt["3"]["inputs"]["text"] = get_random_prompt() + ",".join(
+                    QUALITY_PROMPT_SUFFIX
+                )
+        logger.info(f"Updated prompt: {prompt}")
 
     def queue_prompt(self, prompt):
         p = {"prompt": prompt, "client_id": self.client_id}
@@ -257,19 +284,31 @@ class ImageGen(commands.Cog):
     @commands.command(name="spack", aliases=["", "gi"])
     async def generate_image(self, ctx):
         """Generates an image from war_waifus.json"""
+        if ctx.guild is None:
+            await ctx.author.send(
+                "Your request has been added to the queue. Please wait..."
+            )
+        else:
+            await ctx.send("Your request has been added to the queue. Please wait...")
         await self.unified_queue.put(("spack", ctx))
-        await ctx.send("Your request has been added to the queue. Please wait...")
 
     @commands.command(name="dnd", aliases=["d"])
     async def generate_dnd_image(self, ctx, character: str):
         """Generates an image for dnd characters"""
         if character.lower() not in ["alvys", "iancan", "crumb", "halberd", "yara"]:
             await ctx.send(
-                "character must be one of: alvys, iancan, crumb, halberd, yara"
+                "Character must be one of: alvys, iancan, crumb, halberd, yara"
             )
             return
+
+        if ctx.guild is None:
+            await ctx.author.send(
+                "Your request has been added to the queue. Please wait..."
+            )
+        else:
+            await ctx.send("Your request has been added to the queue. Please wait...")
+
         await self.unified_queue.put(("dnd", (ctx, character)))
-        await ctx.send("Your request has been added to the queue. Please wait...")
 
     async def process_dnd_image_request(self, ctx, character):
         logger.info(
@@ -335,6 +374,35 @@ class ImageGen(commands.Cog):
         logger.info(
             f"Finished process_dnd_image_request for {ctx.author} and character {character}"
         )
+
+    @commands.command(name="custom", aliases=["c"])
+    async def generate_custom_image(self, ctx, *, prompt: str):
+        """Generates an image based on a user-provided prompt and image."""
+        logger.info(f"Received custom image request from {ctx.author}: {prompt}")
+        if not ctx.message.attachments or not ctx.message:
+            await ctx.send("Please attach an image to your message, and prompt")
+            return
+
+        attachment = ctx.message.attachments[0]
+        if not attachment.filename.lower().endswith(("png", "jpg", "jpeg")):
+            await ctx.send("Please attach a valid image file (PNG, JPG, or JPEG).")
+            return
+
+        await ctx.send("Your request has been added to the queue. Please wait...")
+
+        try:
+            # Fetch the image
+            image_data = await attachment.read()
+            logger.info(f"Fetched image data from {attachment.filename}")
+            logger.info("Adding to the queue for processing")
+            # Add the task to the unified queue
+
+            self.unified_queue.put_nowait(
+                ("custom", {"ctx": ctx, "image_data": image_data, "prompt": prompt})
+            )
+        except Exception as e:
+            logger.error(f"Error adding custom image task to queue: {e}")
+            await ctx.send("Failed to add your request to the queue.")
 
     async def process_image_request(self, ctx):
         logger.info(f"Starting process_image_request for {ctx.author}")

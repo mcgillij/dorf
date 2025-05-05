@@ -28,6 +28,9 @@ class MacroCog(commands.Cog):
 
     @commands.command()
     async def addmacro(self, ctx, name: str, *, response: str):
+        if ctx.guild is None:
+            await ctx.send("This command can only be used in a server.")
+            return
         """Create a new macro."""
         try:
             with self.db:
@@ -41,6 +44,9 @@ class MacroCog(commands.Cog):
 
     @commands.command()
     async def delmacro(self, ctx, name: str):
+        if ctx.guild is None:
+            await ctx.send("This command can only be used in a server.")
+            return
         """Delete a macro."""
         with self.db:
             cur = self.db.execute(
@@ -54,6 +60,9 @@ class MacroCog(commands.Cog):
 
     @commands.command()
     async def listmacros(self, ctx):
+        if ctx.guild is None:
+            await ctx.send("This command can only be used in a server.")
+            return
         """List all macros."""
         cur = self.db.execute(
             "SELECT name FROM macros WHERE guild_id = ? ORDER BY name",
@@ -67,6 +76,8 @@ class MacroCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
+        if message.guild is None:
+            return  # Ignore DMs
         if message.author.bot:
             return
 
