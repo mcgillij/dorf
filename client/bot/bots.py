@@ -2,6 +2,7 @@ import os
 from random import choice
 import logging
 
+import asyncio
 import discord
 from discord.ext import commands
 
@@ -12,6 +13,21 @@ from bot.processing import (
     process_nic_response,
 )
 from bot.utilities import filter_message, LLMClient, start_capture, connect_to_voice
+
+from bot.workers.process_response_worker import (
+    process_derf_response_queue,
+    process_nic_response_queue,
+)
+from bot.workers.process_summarizer_worker import (
+    process_derf_summarizer_queue,
+    process_nic_summarizer_queue,
+)
+from bot.workers.audio_worker import derf_audio_task, nic_audio_task
+from bot.workers.playback_worker import playback_derf_task, playback_nic_task
+from bot.workers.voice_queue_processor import (
+    monitor_derf_response_queue,
+    monitor_nic_response_queue,
+)
 
 from bot.constants import (
     WORKSPACE,
@@ -79,6 +95,19 @@ class NicBot(BaseBot):
         self.add_command(nic)
         self.llm = LLMClient(AUTH_TOKEN, NIC_WORKSPACE, NIC_SESSION_ID)
 
+    async def on_ready(self):
+        await connect_to_voice(self)
+        worker_tasks = [
+            lambda: nic_audio_task(self),
+            lambda: playback_nic_task(self),
+            lambda: process_nic_response_queue(self),
+            lambda: process_nic_summarizer_queue(self),
+            lambda: monitor_nic_response_queue(self),
+        ]
+        for task in worker_tasks:
+            asyncio.create_task(task())
+        logger.info(f"{self.name} setup complete")
+
 
 class DerfBot(BaseBot):
     def __init__(self, *args, **kwargs):
@@ -125,3 +154,35 @@ class DerfBot(BaseBot):
             )
             if voice_channel:
                 await start_capture(guild, voice_channel, self)
+
+        extensions = [
+            "bot.leveling",
+            "bot.adventure",
+            "bot.quotes",
+            "bot.emoji",
+            "bot.poll",
+            "bot.misc",
+            "bot.search",
+            "bot.macro",
+            "bot.faction",
+            "bot.combo",
+            "bot.metrics",
+            "bot.sdcog",
+            "bot.news",
+            "bot.translate",
+        ]
+        for extension in extensions:
+            if extension not in self.extensions:
+                await self.load_extension(extension)
+
+        await connect_to_voice(self)
+        worker_tasks = [
+            lambda: derf_audio_task(self),
+            lambda: playback_derf_task(self),
+            lambda: process_derf_response_queue(self),
+            lambda: process_derf_summarizer_queue(self),
+            lambda: monitor_derf_response_queue(self),
+        ]
+        for task in worker_tasks:
+            asyncio.create_task(task())
+        logger.info(f"{self.name} setup complete")

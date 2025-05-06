@@ -5,7 +5,7 @@ from random import randint
 import logging
 import asyncio
 import aiohttp
-from db import SQLiteDB
+from bot.db import SQLiteDB
 from bot.redis_client import redis_client
 from bot.constants import WHISPER_QUEUE, VOICE_RESPONSE_QUEUE, VOICE_NIC_RESPONSE_QUEUE
 

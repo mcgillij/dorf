@@ -2,13 +2,19 @@
 
 import asyncio
 import logging
+
+from bot.bots import DerfBot, NicBot
 from bot.log_config import setup_logging
-from bot.client import derf_bot, nic_bot
 from bot.config import NIC_DISCORD_BOT_TOKEN, DISCORD_BOT_TOKEN
 
+import logging
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+# Create bots
+derf_bot = DerfBot()
+nic_bot = NicBot()
 
 
 async def main():
