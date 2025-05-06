@@ -52,6 +52,7 @@ class ImageGen(commands.Cog):
         self.client_id = str(uuid.uuid4())
         self.emoji = "🎨"
         self.photo_emoji = "📷"
+        self.retry_emoji = "🔄"
         self.unified_queue = asyncio.Queue()  # In-memory queue for image generation
         self.image_processing_task = self.bot.loop.create_task(
             self.process_unified_queue()
@@ -119,25 +120,77 @@ class ImageGen(commands.Cog):
         if user.bot:
             return  # Ignore bot reactions
 
-        if str(reaction.emoji) not in [str(self.emoji), str(self.photo_emoji)]:
+        if str(reaction.emoji) not in [
+            str(self.emoji),
+            str(self.photo_emoji),
+            str(self.retry_emoji),
+        ]:
             return
 
-        photo = reaction.emoji == self.photo_emoji
         message = reaction.message
 
-        if message.attachments:
-            attachment_url = message.attachments[0].url
-            await self.unified_queue.put(
-                (
-                    "reaction",
-                    {
-                        "attachment_url": attachment_url,
-                        "message": message,
-                        "photo": photo,
-                    },
+        if str(reaction.emoji) == str(self.retry_emoji):
+            # Check if the message contains a previously run command
+            if (
+                message.content.startswith("!photo")
+                or message.content.startswith("!draw")
+                or message.content.startswith("!spork")
+            ):
+                logger.info(f"Retrying command for message: {message.content}")
+                # Extract the command and parameters
+                command, *parameters = message.content.split(maxsplit=1)
+                parameter = parameters[0] if parameters else ""
+
+                # Re-trigger the appropriate command
+                ctx = await self.bot.get_context(message)
+                if command == "!photo":
+                    await self.generate_photo_image(ctx, prompt=parameter)
+                elif command == "!draw":
+                    await self.generate_draw_image(ctx, prompt=parameter)
+                elif command == "!spork":
+                    await self.generate_image_request(ctx, parameter=parameter)
+            return
+
+        if str(reaction.emoji) in [str(self.emoji), str(self.photo_emoji)]:
+            photo = reaction.emoji == self.photo_emoji
+            if message.attachments:
+                attachment_url = message.attachments[0].url
+                await self.unified_queue.put(
+                    (
+                        "reaction",
+                        {
+                            "attachment_url": attachment_url,
+                            "message": message,
+                            "photo": photo,
+                        },
+                    )
                 )
-            )
-            logger.info("Reaction added to unified queue.")
+                logger.info("Reaction added to unified queue.")
+
+    # @commands.Cog.listener()
+    # async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
+    # if user.bot:
+    # return  # Ignore bot reactions
+
+    # if str(reaction.emoji) not in [str(self.emoji), str(self.photo_emoji)]:
+    # return
+
+    # photo = reaction.emoji == self.photo_emoji
+    # message = reaction.message
+
+    # if message.attachments:
+    # attachment_url = message.attachments[0].url
+    # await self.unified_queue.put(
+    # (
+    # "reaction",
+    # {
+    # "attachment_url": attachment_url,
+    # "message": message,
+    # "photo": photo,
+    # },
+    # )
+    # )
+    # logger.info("Reaction added to unified queue.")
 
     async def process_reaction(
         self, attachment_url: str, message: discord.Message, photo: bool
