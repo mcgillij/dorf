@@ -16,6 +16,16 @@ class MiscCog(commands.Cog):
         self.bot = bot
         self.bot.launch_time = discord.utils.utcnow()
 
+    @commands.command(name="list", aliases=["commands"])
+    async def list_commands(self, ctx):
+        """Lists all commands, their parameter combinations, and aliases."""
+        command_details = []
+        for cmd in self.bot.commands:
+            params = ", ".join(cmd.clean_params.keys())
+            aliases = ", ".join(cmd.aliases) if cmd.aliases else "None"
+            command_details.append(f"!{cmd.name}({params}) - Aliases: [{aliases}]")
+        await ctx.send("Available commands:\n" + "\n".join(command_details))
+
     @commands.command()
     async def uptime(self, ctx):
         """Displays the bot's uptime."""
