@@ -12,6 +12,25 @@ rag_builder = RAGContextBuilder(collection, search_internet, similarity_threshol
 logger = logging.getLogger(__name__)
 
 
+async def wrap_model_translate(model, query, on_message=None, callback=None) -> str:
+    """Wrap a synchronous call in an async context if necessary."""
+    logger.info("in the wrapper")
+    loop = asyncio.get_event_loop()
+    chat = lms.Chat(
+        "translate the text from the indian marathi language to english. no preamble / notes",
+    )
+    chat.add_user_message(query)
+    result = await loop.run_in_executor(
+        None,
+        lambda: model.respond(
+            chat,
+            on_message=chat.append,
+        ),
+    )
+
+    return result  # assuming this is text
+
+
 async def wrap_model(model, query, on_message=None, callback=None) -> str:
     """Wrap a synchronous call in an async context if necessary."""
     logger.info("in the wrapper")
@@ -27,7 +46,6 @@ async def wrap_model(model, query, on_message=None, callback=None) -> str:
             on_message=chat.append,
         ),
     )
-    logger.info(f"*******CHAT*************** {result=}")
 
     return result  # assuming this is text
 
@@ -63,6 +81,22 @@ async def wrap_model_act(model, query, tools, on_message=None, callback=None) ->
     return parsed_result
 
 
+async def translate(query: str, callback=None) -> str:
+    """translate"""
+    model = lms.llm()  # load model
+    logger.info("model loaded")
+
+    response = await wrap_model(
+        model,
+        query,
+        # callback=callback,
+    )
+    content = extract_content(response)
+    # logger.info(f"********************************  Content: {content}")
+    # logger.info(f"********************************  Response: {response}")
+    return content
+
+
 async def summarize(query: str, callback) -> str:
     """summarize"""
     model = lms.llm()  # load model
@@ -74,8 +108,8 @@ async def summarize(query: str, callback) -> str:
         # callback=callback,
     )
     content = extract_content(response)
-    logger.info(f"********************************  Content: {content}")
-    logger.info(f"********************************  Response: {response}")
+    # logger.info(f"********************************  Content: {content}")
+    # logger.info(f"********************************  Response: {response}")
     return content
 
 

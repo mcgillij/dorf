@@ -58,6 +58,7 @@ async def derfbot_ready():
     await derf_bot.load_extension("bot.metrics")
     await derf_bot.load_extension("bot.sdcog")
     await derf_bot.load_extension("bot.news")
+    await derf_bot.load_extension("bot.translate")
 
     await setup_bot(
         bot_instance=derf_bot,
