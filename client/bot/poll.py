@@ -14,7 +14,7 @@ class PollCog(commands.Cog):
 
     @commands.command(name="poll", aliases=["p"])
     async def poll(self, ctx, *, question: str):
-        """Create a poll that automatically ends after 5 minutes."""
+        """Create a poll that automatically ends after 5 minutes. format: <question>:str"""
         poll_id = str(ctx.message.id)
         active_polls[poll_id] = {
             "question": question,

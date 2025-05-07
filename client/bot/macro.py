@@ -28,10 +28,10 @@ class MacroCog(commands.Cog):
 
     @commands.command()
     async def addmacro(self, ctx, name: str, *, response: str):
+        """Add a macro, format <name>:str <actualmacro>:str"""
         if ctx.guild is None:
             await ctx.send("This command can only be used in a server.")
             return
-        """Create a new macro."""
         try:
             with self.db:
                 self.db.execute(
@@ -44,10 +44,10 @@ class MacroCog(commands.Cog):
 
     @commands.command()
     async def delmacro(self, ctx, name: str):
+        """Delete's a macro, given the name"""
         if ctx.guild is None:
             await ctx.send("This command can only be used in a server.")
             return
-        """Delete a macro."""
         with self.db:
             cur = self.db.execute(
                 "DELETE FROM macros WHERE guild_id = ? AND name = ?",
@@ -60,10 +60,10 @@ class MacroCog(commands.Cog):
 
     @commands.command()
     async def listmacros(self, ctx):
+        """show the list of macros"""
         if ctx.guild is None:
             await ctx.send("This command can only be used in a server.")
             return
-        """List all macros."""
         cur = self.db.execute(
             "SELECT name FROM macros WHERE guild_id = ? ORDER BY name",
             (ctx.guild.id,),

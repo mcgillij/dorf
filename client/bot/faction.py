@@ -260,6 +260,7 @@ class FactionCog(commands.Cog):
 
     @commands.command(name="factioninfo", aliases=["fi"])
     async def factioninfo(self, ctx):
+        """Gives the faction information for the user."""
         user_id = ctx.author.id
         faction_id = self.get_user_faction(user_id)
 
@@ -345,6 +346,7 @@ class FactionCog(commands.Cog):
 
     @commands.command(name="factionleaderboard", aliases=["fl"])
     async def factionleaderboard(self, ctx):
+        """Show the faction leaderboard."""
         with sqlite3.connect(FACTION_DB) as conn:
             c = conn.cursor()
 
@@ -423,6 +425,7 @@ class FactionCog(commands.Cog):
 
     @commands.command(name="warstatus", aliases=["ws", "war_status"])
     async def war_status(self, ctx):
+        """Outputs the current war status"""
         WAR_DURATION_DAYS = 7
         with sqlite3.connect(FACTION_DB) as conn:
             c = conn.cursor()
@@ -503,6 +506,7 @@ class FactionCog(commands.Cog):
 
     @commands.command(name="startwar")
     async def startwar(self, ctx):
+        """Start a emoji war if one isn't already on-going"""
         with sqlite3.connect(FACTION_DB) as conn:
             c = conn.cursor()
             c.execute("SELECT started_at FROM war_state WHERE id = 1")

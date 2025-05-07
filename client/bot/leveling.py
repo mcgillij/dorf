@@ -118,6 +118,7 @@ class Leveling(commands.Cog):
     @commands.has_permissions(administrator=True)
     @commands.guild_only()
     async def reassign_all_roles(self, ctx):
+        """Re-calculate and assign roles for all members based on their levels. Admin-only"""
         await ctx.send(
             "Reassigning roles based on user levels. This may take a moment..."
         )
@@ -271,6 +272,7 @@ class Leveling(commands.Cog):
 
     @commands.command(name="profile")
     async def profile(self, ctx, user: discord.User = None):
+        """Displays the users profile"""
         user = user or ctx.author
         with sqlite3.connect(XP_DB) as conn:
             c = conn.cursor()
@@ -322,6 +324,7 @@ class Leveling(commands.Cog):
 
     @commands.command(name="rank")
     async def rank(self, ctx, user: discord.User = None):
+        """Shows the rank of the user"""
         user = user or ctx.author
         with sqlite3.connect(XP_DB) as conn:
             c = conn.cursor()
@@ -348,6 +351,7 @@ class Leveling(commands.Cog):
 
     @commands.command(name="leaderboard", aliases=["lb"])
     async def leaderboard(self, ctx, limit: int = 10):
+        """Show the level leaderboard"""
         limit = max(1, min(limit, 20))
         with sqlite3.connect(XP_DB) as conn:
             c = conn.cursor()
@@ -385,7 +389,7 @@ class Leveling(commands.Cog):
 
     @commands.command(name="prestige")
     async def prestige(self, ctx):
-        """Allows a user to prestige if they meet the requirements."""
+        """Allows a user to prestige if they meet the requirements. (level50)"""
         user_id = ctx.author.id
         guild = ctx.guild
         member = guild.get_member(user_id)

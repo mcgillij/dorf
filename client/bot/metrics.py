@@ -182,7 +182,7 @@ class Metrics(commands.Cog):
 
     @commands.command(name="emoji_trends")
     async def emoji_trends(self, ctx, emoji_char: str):
-        """Show usage trends for a specific emoji."""
+        """Show usage trends for a specific emoji. format: <emoji>:str"""
         with sqlite3.connect(EMOJI_DB) as conn:
             df = pd.read_sql_query(
                 """
@@ -203,6 +203,7 @@ class Metrics(commands.Cog):
 
     @commands.command(name="activity_over_time")
     async def activity_over_time(self, ctx):
+        """Shows the activity over time"""
         with sqlite3.connect(METRICS_DB) as conn:
             df = pd.read_sql_query(
                 """
@@ -221,6 +222,7 @@ class Metrics(commands.Cog):
 
     @commands.command(name="top_users")
     async def top_users(self, ctx):
+        """Show the top users"""
         with sqlite3.connect(METRICS_DB) as conn:
             df = pd.read_sql_query(
                 """
@@ -256,6 +258,7 @@ class Metrics(commands.Cog):
 
     @commands.command(name="channel_breakdown")
     async def channel_breakdown(self, ctx):
+        """Show the channel breakdown graph"""
         with sqlite3.connect(METRICS_DB) as conn:
             df = pd.read_sql_query(
                 """
@@ -304,6 +307,7 @@ class Metrics(commands.Cog):
 
     @commands.command(name="command_usage")
     async def command_usage(self, ctx):
+        """Shows the aggregate command usage"""
         with sqlite3.connect(METRICS_DB) as conn:
             df = pd.read_sql_query(
                 """
@@ -319,6 +323,7 @@ class Metrics(commands.Cog):
 
     @commands.command(name="weekly_summary")
     async def weekly_summary(self, ctx):
+        """Show the weekly summary"""
         with sqlite3.connect(METRICS_DB) as conn:
             df = pd.read_sql_query(
                 """
@@ -335,6 +340,7 @@ class Metrics(commands.Cog):
 
     @commands.command(name="command_trends")
     async def command_trends(self, ctx, command_name):
+        """Show the command trends of a particular command, format: <command_name>:str"""
         with sqlite3.connect(METRICS_DB) as conn:
             df = pd.read_sql_query(
                 """

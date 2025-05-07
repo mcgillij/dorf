@@ -346,7 +346,7 @@ class ImageGen(commands.Cog):
 
     @commands.command(name="generate", aliases=["spack", "dnd", "spork"])
     async def generate_image_request(self, ctx, *, parameter: str = ""):
-        """Generates an image based on predefined or custom prompts."""
+        """Generates Image based on, !spack, !dnd <character>:str, !spork <prompt>:str"""
         invoked_alias = ctx.invoked_with  # Get the alias or command name used
         if invoked_alias == "dnd":
             if parameter == "" or parameter.lower() not in [
@@ -442,7 +442,7 @@ class ImageGen(commands.Cog):
 
     @commands.command(name="photo", aliases=["ph"])
     async def generate_photo_image(self, ctx, *, prompt: str):
-        """Generates an image based on a user-provided prompt and photo."""
+        """Uses an attached image to generate a photo based on a user-provided prompt. format: !photo <prompt>:str (attached image)"""
         if ctx.guild is not None:
             await ctx.send("This command can only be used in DMs.")
             return
@@ -474,7 +474,7 @@ class ImageGen(commands.Cog):
 
     @commands.command(name="draw", aliases=["dr"])
     async def generate_draw_image(self, ctx, *, prompt: str):
-        """Generates an image based on a user-provided prompt and image."""
+        """Uses an attached image to generate a drawing based on a user-provided prompt. format: !draw <prompt>:str (attached image)"""
         logger.info(f"Received draw image request from {ctx.author}: {prompt}")
         if ctx.guild is not None:
             await ctx.send("This command can only be used in DMs.")

@@ -36,6 +36,7 @@ class MiscCog(commands.Cog):
 
     @commands.command()
     async def check_bots(self, ctx):
+        """Check the bots voicechat connectivity"""
         if not ctx.author.voice or not ctx.author.voice.channel:
             return await ctx.send("You must be in a voice channel first.")
         bots = [m.name for m in ctx.author.voice.channel.members if m.bot]
@@ -45,7 +46,7 @@ class MiscCog(commands.Cog):
 
     @commands.command()
     async def frieren(self, ctx):
-        """Sends a random image from the images directory."""
+        """Sends a random image from the frieren directory."""
         image_path = get_random_image_path(FRIEREN_DIR)
         logger.info(f"Image path: {image_path}")
         if image_path:

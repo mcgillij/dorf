@@ -92,7 +92,7 @@ class QuoteCog(commands.Cog):
 
     @commands.command(name="addquote", aliases=["aq"])
     async def addquote(self, ctx, *, text):
-        """Add a quote"""
+        """Add a quote, format: <quote>:str"""
         # Optional: try to detect if user wants to specify the author manually.
         if "|" in text:
             author, quote = text.split("|", 1)
@@ -111,7 +111,7 @@ class QuoteCog(commands.Cog):
 
     @commands.command(name="listquotes", aliases=["lq"])
     async def listquotes(self, ctx, page: int = 1):
-        """List the quotes, pass in a number to see different pages"""
+        """List the quotes, format: <page>:int"""
         per_page = 5
         offset = (page - 1) * per_page
         c.execute(
@@ -133,14 +133,14 @@ class QuoteCog(commands.Cog):
     @commands.command(name="deletequote", aliases=["dq"])
     @commands.has_permissions(manage_messages=True)
     async def deletequote(self, ctx, id: int):
-        """Delete a specific quote passin in a number"""
+        """Delete a specific quote passin in a number, format: <number>:int"""
         c.execute("DELETE FROM quotes WHERE id = ?", (id,))
         conn.commit()
         await ctx.send(f"Quote #{id} deleted! 🗑️")
 
     @commands.command(name="searchquote", aliases=["sq"])
     async def searchquote(self, ctx, *, keyword):
-        """Search quotes for a keyword"""
+        """Search quotes for a keyword, format: <keyword>:str"""
         c.execute(
             "SELECT id, author, quote_text FROM quotes WHERE quote_text LIKE ?",
             (f"%{keyword}%",),
