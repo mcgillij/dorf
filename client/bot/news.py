@@ -281,7 +281,7 @@ class NewsAgent(commands.Cog):
 
     @commands.command(name="add_task")
     async def add_task_command(self, ctx, task_name: str, interval: int):
-        """Add a new scheduled task to the database."""
+        """Add a new scheduled task to the database. format: <name>:str <interval>:int(in minutes)"""
         user_id = ctx.author.id
         cursor = self.db.cursor()
 
@@ -310,6 +310,7 @@ class NewsAgent(commands.Cog):
 
     @commands.command(name="remove_task")
     async def remove_task_command(self, ctx, task_id: int):
+        """Remove task id. format: <id>:int"""
         """Remove a scheduled task by its ID."""
         self.remove_task(task_id)
         await ctx.send(f"Task with ID {task_id} has been removed.")
@@ -337,7 +338,7 @@ class NewsAgent(commands.Cog):
 
     @commands.command(name="add_topic")
     async def add_topic(self, ctx, topic: str, source: str):
-        """Add a topic and optional source to the user's preferences."""
+        """Add a topic and optional source to the user's preferences. format: <topic>:str <source>:str"""
         user_id = ctx.author.id
         username = ctx.author.name
 
@@ -380,7 +381,7 @@ class NewsAgent(commands.Cog):
 
     @commands.command(name="news")
     async def news(self, ctx):
-        """Search for news articles based on a query."""
+        """Search for news articles based on your preferences."""
         # Query user preferences
         user_preferences = await self.get_user_preferences(
             ctx.author.id
@@ -410,7 +411,7 @@ class NewsAgent(commands.Cog):
 
     @commands.command(name="update_location")
     async def update_location(self, ctx, location: str, country: str):
-        """Update the user's location."""
+        """Update the user's location. format: <location>:str <country>:str"""
         user_id = ctx.author.id
         username = ctx.author.name
         cursor = self.db.cursor()

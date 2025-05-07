@@ -25,6 +25,7 @@ class Adventure(commands.Cog):
 
     @commands.command()
     async def adventure(self, ctx):
+        """Start an Emoji adventure"""
         leveling_cog = self.bot.get_cog("Leveling")
         if leveling_cog:
             user_stats = await leveling_cog.get_user_stats(ctx)
