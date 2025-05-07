@@ -36,6 +36,7 @@ class SearchCog(commands.Cog):
 
     @commands.command(name="search", aliases=["s"])
     async def search(self, ctx, *, message: str):
+        """Do a 'deep' search, format: <search query>:str"""
         logger.info("in search")
 
         def callback(param=None):
