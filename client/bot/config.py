@@ -1,5 +1,5 @@
 import os
-
+from enum import Enum
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -32,3 +32,10 @@ VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID", ""))
 # Chat channel id
 CHAT_CHANNEL_ID = int(os.getenv("CHAT_CHANNEL_ID", ""))
 WHEREAMI = os.getenv("WHEREAMI", "")
+
+
+class AvatarState(Enum):
+    IDLE = "idle"
+    TALKING = "talking"
+    THINKING = "thinking"
+    DRAWING = "drawing"

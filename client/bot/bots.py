@@ -62,6 +62,24 @@ INTENTS.reactions = True
 INTENTS.typing = True
 INTENTS.dm_messages = True
 
+EXTENTIONS = [
+    "bot.leveling",
+    "bot.adventure",
+    "bot.quotes",
+    "bot.emoji",
+    "bot.poll",
+    "bot.misc",
+    "bot.search",
+    "bot.macro",
+    "bot.faction",
+    "bot.combo",
+    "bot.metrics",
+    "bot.sdcog",
+    "bot.news",
+    "bot.translate",
+    "bot.statemanager",
+]
+
 
 class BaseBot(commands.Bot):
     def __init__(self, name, prefix, *args, **kwargs):
@@ -155,23 +173,7 @@ class DerfBot(BaseBot):
             if voice_channel:
                 await start_capture(guild, voice_channel, self)
 
-        extensions = [
-            "bot.leveling",
-            "bot.adventure",
-            "bot.quotes",
-            "bot.emoji",
-            "bot.poll",
-            "bot.misc",
-            "bot.search",
-            "bot.macro",
-            "bot.faction",
-            "bot.combo",
-            "bot.metrics",
-            "bot.sdcog",
-            "bot.news",
-            "bot.translate",
-        ]
-        for extension in extensions:
+        for extension in EXTENTIONS:
             if extension not in self.extensions:
                 await self.load_extension(extension)
 
