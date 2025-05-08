@@ -18,12 +18,14 @@ from bot.constants import (
 )
 
 logger = logging.getLogger(__name__)
-pipeline = KPipeline(lang_code="a")  # english
 
 
 def process_kokoro_audio(line_text, voice, output_wav):
     """Sync function to handle kokoro TTS generation and file writing."""
     try:
+        pipeline = KPipeline(
+            lang_code="a"
+        )  # english #TODO: moved into the function lets see if it works, was global
         generator = pipeline(line_text, voice)
         audio_segments = []
         for _, _, audio in generator:

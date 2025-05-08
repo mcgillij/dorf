@@ -1,0 +1,2 @@
+#!
+./kill && ./startup && tail -f *.log
