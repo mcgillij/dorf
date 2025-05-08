@@ -82,6 +82,8 @@ LEVEL_ROLE_MAPPING = {
     50: 1364043193003544690,  # Einherjar
 }
 
+PRESTIGE_ROLE_ID = 1370154641098149929
+
 # filtered words from bot responses
 FILTERED_KEYWORDS = {
     "behavior driven development",

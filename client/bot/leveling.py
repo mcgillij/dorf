@@ -14,6 +14,7 @@ from bot.constants import (
     XP_COOLDOWN_SECONDS,
     LEVEL_THRESHOLDS,
     LEVEL_ROLE_MAPPING,
+    PRESTIGE_ROLE_ID,
 )
 from bot.config import CHAT_CHANNEL_ID
 
@@ -469,6 +470,16 @@ class Leveling(commands.Cog):
 
         new_prestige = prestige + 1
         await self.check_and_assign_roles(member, 0)
+
+        prestige_role = guild.get_role(PRESTIGE_ROLE_ID)
+        # add the user to the prestige role
+        if prestige_role:
+            try:
+                await member.add_roles(prestige_role)
+            except (discord.Forbidden, discord.HTTPException) as e:
+                logger.error(
+                    f"Failed to assign prestige role to {member.display_name}: {e}"
+                )
 
         embed = discord.Embed(
             title="🌟 Prestige Achieved!",
