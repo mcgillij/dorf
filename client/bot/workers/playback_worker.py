@@ -49,6 +49,9 @@ async def playback_task(bot_instance, queue_name, voice_channel_id):
                     f"Skipping playback as there are only bots in {channel.name}."
                 )
                 continue  # Skip to the next iteration
+            # state for godot bot
+            if bot_instance.statemanager:
+                bot_instance.statemanager.update_state_talking()
 
             # Play the generated audio
             audio_source = await discord.FFmpegOpusAudio.from_probe(
@@ -62,7 +65,9 @@ async def playback_task(bot_instance, queue_name, voice_channel_id):
             # Wait for the audio to finish playing
             while voice_client.is_playing():
                 await asyncio.sleep(0.1)
-
+            # state for godot bot
+            if bot_instance.statemanager:
+                bot_instance.statemanager.update_state_idle()
             # Clean up the opus file
             if os.path.exists(opus_path):
                 os.remove(opus_path)
