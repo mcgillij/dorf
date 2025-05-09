@@ -28,7 +28,11 @@ class StateManager(commands.Cog):
         )
         conn.commit()
         cursor.execute(
-            "INSERT INTO avatar_state (state) VALUES (?)", (AvatarState.IDLE.value,)
+            # test entries
+            # "INSERT INTO avatar_state (state) VALUES (?)", (AvatarState.TALKING.value,)
+            # "INSERT INTO avatar_state (state) VALUES (?)", (AvatarState.THINKING.value,)
+            "INSERT INTO avatar_state (state) VALUES (?)",
+            (AvatarState.IDLE.value,),
         )
         conn.commit()
         conn.close()
@@ -40,6 +44,18 @@ class StateManager(commands.Cog):
         cursor.execute("INSERT INTO avatar_state (state) VALUES (?)", (state.value,))
         conn.commit()
         conn.close()
+
+    def update_state_idle(self):
+        self.update_state(AvatarState.IDLE)
+
+    def update_state_thinking(self):
+        self.update_state(AvatarState.THINKING)
+
+    def update_state_talking(self):
+        self.update_state(AvatarState.TALKING)
+
+    def update_state_drawing(self):
+        self.update_state(AvatarState.DRAWING)
 
     def get_current_state(self) -> str:
         """Retrieves the most recent avatar state from the database."""

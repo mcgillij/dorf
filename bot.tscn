@@ -1,12 +1,12 @@
 [gd_scene load_steps=9 format=3 uid="uid://l735hkmnjjh5"]
 
-[ext_resource type="Script" path="res://bot.gd" id="1_6e6p7"]
+[ext_resource type="Script" uid="uid://djscrenns3xsb" path="res://bot.gd" id="1_6e6p7"]
 [ext_resource type="PackedScene" uid="uid://dl2k1ph046i2p" path="res://prefab/text_input_window.tscn" id="2_4qqjq"]
-[ext_resource type="Script" path="res://addons/awaitable_http_request/awaitable_http_request.gd" id="2_noa4f"]
+[ext_resource type="Script" uid="uid://dv8yjm3k2kyv5" path="res://addons/awaitable_http_request/awaitable_http_request.gd" id="2_noa4f"]
 [ext_resource type="Texture2D" uid="uid://dv56mrtgkaj11" path="res://assets/images/dorf.png" id="3_pbiqb"]
 [ext_resource type="Texture2D" uid="uid://cxqgy3hyso5ks" path="res://assets/images/dorf_talking.png" id="5_it7v2"]
 [ext_resource type="Texture2D" uid="uid://byuegm6l8lsg4" path="res://assets/images/dorf_thinking.png" id="6_dfvr4"]
-[ext_resource type="Script" path="res://animated_sprite_2d.gd" id="7_evtps"]
+[ext_resource type="Script" uid="uid://cat1661e4s2k" path="res://animated_sprite_2d.gd" id="7_evtps"]
 
 [sub_resource type="SpriteFrames" id="SpriteFrames_sibk1"]
 animations = [{

@@ -60,10 +60,13 @@ class ImageGen(commands.Cog):
 
     async def process_unified_queue(self):
         logger.info("Processing unified queue...")
+        statemanager = self.bot.get_cog("StateManager")
         while True:
             task_type, data = await self.unified_queue.get()
             logger.info(f"Processing task of type: {task_type}, {data}")
             try:
+                if statemanager:
+                    statemanager.update_state_thinking()
                 if task_type == "spack":
                     ctx = data["ctx"]
                     await self.process_image_request(ctx)
@@ -113,6 +116,8 @@ class ImageGen(commands.Cog):
             except Exception as e:
                 logger.error(f"Error processing unified queue task: {e}")
             finally:
+                if statemanager:
+                    statemanager.update_state_idle()
                 self.unified_queue.task_done()
 
     @commands.Cog.listener()
@@ -379,7 +384,6 @@ class ImageGen(commands.Cog):
         logger.info(
             f"Starting process_dnd_image_request for {ctx.author} and character {character}"
         )
-        # Existing code
         async with ctx.typing():
             logger.info(f"Processing DnD image request for character: {character}")
             character_prompt = None

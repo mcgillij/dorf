@@ -13,15 +13,39 @@ var dorf_idle := load("res://assets/images/dorf.png")
 var dorf_talking := load("res://assets/images/dorf_talking.png")
 var dorf_thinking := load("res://assets/images/dorf_thinking.png")
 
+var db: SQLite
 var time_since_last_poll = 0.0
+var time_accumulator: float = 0.0
 
 func _ready() -> void:
+	db = SQLite.new()
+	db.path = "res://client/avatar_state.db"
+	db.open_db()
 	connect_signals()
 	$Timer.timeout.connect(back_to_idle)
 	$Timer.start()
 
+func get_state() -> String:
+	db.query("SELECT state FROM avatar_state ORDER BY updated_at DESC LIMIT 1")
+	var d := db.query_result
+	#print_debug("here is your db state: ", d)
+	return d[0]["state"]
+
+func state_machine() -> void:
+	var state := get_state()
+	match state:
+		"idle":
+			dorf.play(&"idle")
+		"thinking":
+			dorf.play(&"thinking")
+		"talking":
+			dorf.play(&"talking")
+
 func _process(delta: float) -> void:
-	pass
+	time_accumulator += delta
+	if time_accumulator >= 0.5:
+		time_accumulator = 0.0
+		state_machine()
 
 func back_to_idle():
 	dorf.play(&"idle")
