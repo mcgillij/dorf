@@ -94,11 +94,17 @@ class BaseBot(commands.Bot):
 @commands.command()
 async def derf(ctx, *, message: str):
     logger.info("in derf")
+    if ctx.bot.statemanager:
+        ctx.bot.statemanager.update_state_thinking()
     if filter_message(message):
         await ctx.send(choice(FILTERED_RESPONSES))
         return
     uid = await queue_derf_message_processing(ctx, message)
+    if ctx.bot.statemanager:
+        ctx.bot.statemanager.update_state_talking()
     await process_derf_response(ctx, uid)
+    if ctx.bot.statemanager:
+        ctx.bot.statemanager.update_state_idle()
 
 
 @commands.command()
@@ -134,6 +140,7 @@ class DerfBot(BaseBot):
         self.add_command(derf)
         self.add_listener(self.on_voice_state_update)
         self.llm = LLMClient(AUTH_TOKEN, WORKSPACE, SESSION_ID)
+        self.statemanager = None
 
     async def handle_voice_state_update(self, member, before, after):
         logger.info(
@@ -176,6 +183,12 @@ class DerfBot(BaseBot):
         for extension in EXTENTIONS:
             if extension not in self.extensions:
                 await self.load_extension(extension)
+
+        self.statemanager = self.get_cog("StateManager")
+        if not self.statemanager:
+            logger.warning("StateManager cog not found!")
+        else:
+            logger.info("StateManager successfully loaded.")
 
         await connect_to_voice(self)
         worker_tasks = [

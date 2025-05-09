@@ -46,15 +46,19 @@ class StateManager(commands.Cog):
         conn.close()
 
     def update_state_idle(self):
+        logger.info("Updating state to IDLE")
         self.update_state(AvatarState.IDLE)
 
     def update_state_thinking(self):
+        logger.info("Updating state to THINKING")
         self.update_state(AvatarState.THINKING)
 
     def update_state_talking(self):
+        logger.info("Updating state to TALKING")
         self.update_state(AvatarState.TALKING)
 
     def update_state_drawing(self):
+        logger.info("Updating state to DRAWING")
         self.update_state(AvatarState.DRAWING)
 
     def get_current_state(self) -> str:
