@@ -31,7 +31,7 @@ INPUT_IMAGE_DIR.mkdir(exist_ok=True)
 
 WAIFU_PROMPTS = "waifu_prompts.json"
 _cached_prompts = ""
-QUALITY_PROMPT_SUFFIX = [", embedding:lazypos"]
+QUALITY_PROMPT_SUFFIX = [", embedding:lazypos, lazypos"]
 MAX_IMAGE_HEIGHT = 1024
 
 
