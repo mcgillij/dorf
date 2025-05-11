@@ -70,6 +70,10 @@ class MiscCog(commands.Cog):
             await message.channel.send("NO U CHUP!")
             return
 
+        if content.lower().startswith("ch") and content.endswith("up"):
+            await message.channel.send("NO U CHUP!")
+            return
+
     @commands.command()
     async def marne(self, ctx):
         """send the url to spackmarne.com"""
