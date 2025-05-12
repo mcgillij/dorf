@@ -4,6 +4,7 @@ import dice
 import discord
 from discord.ext import commands
 from bot.utilities import get_random_image_path
+from rapidfuzz import fuzz
 
 logger = logging.getLogger(__name__)
 from bot.constants import (
@@ -61,12 +62,14 @@ class MiscCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
+
         if message.author.bot:
             return  # Ignore bot messages
 
         content = message.content.strip()
 
-        if content.lower().startswith("chup"):
+        # Check for variations of "chup" using fuzzy matching
+        if fuzz.partial_ratio(content.lower(), "chup") > 80:
             await message.channel.send("NO U CHUP!")
             return
 
