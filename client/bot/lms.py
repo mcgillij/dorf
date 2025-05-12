@@ -196,7 +196,7 @@ Query:
 
         final_query = (
             query
-            + " Use your 'search_tool' *only* if you cannot answer from the provided Context. Give your response in text, never JSON"
+            + "Always use the 'search_tool' if you cannot answer from the provided Context. Give your response in text, never JSON"
         )
 
     logger.info(f"Final query to model: {final_query}")

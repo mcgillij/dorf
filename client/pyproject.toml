@@ -31,6 +31,7 @@ trafilatura = "^2.0.0"
 chromadb = "^1.0.7"
 pillow = "^11.2.1"
 websockets = "^15.0.1"
+rapidfuzz = "^3.13.0"
 
 
 [tool.poetry.group.dev.dependencies]
