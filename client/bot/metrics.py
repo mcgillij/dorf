@@ -7,6 +7,8 @@ import discord
 from discord.ext import commands, tasks
 
 import matplotlib.pyplot as plt
+from matplotlib import rcParams
+
 import pandas as pd
 
 from bot.constants import METRICS_DB, EMOJI_DB
@@ -150,6 +152,8 @@ class Metrics(commands.Cog):
         await self.bot.wait_until_ready()
 
     def create_plot_and_send(self, ctx, df, title, xlabel, ylabel):
+        rcParams["font.family"] = "Symbola"
+
         plt.figure(figsize=(10, 6))
         df.plot()
         plt.title(title)
