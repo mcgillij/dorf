@@ -40,6 +40,7 @@ MACRO_DB = "macros.db"
 FACTION_DB = "faction_data.db"
 METRICS_DB = "metrics.db"
 NEWS_DB = "news_agent.db"
+INSULT_DB = "insult.db"
 AVATAR_STATE_DB_PATH = "avatar_state.db"
 
 # factions

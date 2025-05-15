@@ -217,7 +217,7 @@ class NewsAgent(commands.Cog):
     @tasks.loop(minutes=1)
     async def check_tasks(self):
         """Check the database for scheduled tasks and ensure they are running."""
-        logger.info("Checking for tasks to start or stop.")
+        # logger.info("Checking for tasks to start or stop.")
         cursor = self.db.cursor()
         cursor.execute("SELECT id, task_name, interval, status FROM scheduled_tasks")
         scheduled_tasks = cursor.fetchall()

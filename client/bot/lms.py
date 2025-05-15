@@ -33,6 +33,25 @@ async def wrap_model_to_indian_translate(
     return result  # assuming this is text
 
 
+async def wrap_model_qa_insult(model) -> str:
+    """Wrap a synchronous call in an async context if necessary."""
+    logger.info("in the wrapper")
+    loop = asyncio.get_event_loop()
+    chat = lms.Chat(
+        "You come up with 1 sick burn / insult aimed at someone's QA skills (pytest, bdd, selenium, etc). no preamble / notes, just 1 burn",
+    )
+    # chat.add_user_message(query)
+    result = await loop.run_in_executor(
+        None,
+        lambda: model.respond(
+            chat,
+            on_message=chat.append,
+        ),
+    )
+
+    return result  # assuming this is text
+
+
 async def wrap_model_from_indian_translate(
     model, query, on_message=None, callback=None
 ) -> str:
@@ -102,6 +121,21 @@ async def wrap_model_act(model, query, tools, on_message=None, callback=None) ->
 
     logger.info(f"********************** {parsed_result=}")
     return parsed_result
+
+
+async def qa_insult() -> str:
+    """QA Insult"""
+    model = lms.llm()  # load model
+    logger.info("model loaded")
+
+    response = await wrap_model_qa_insult(
+        model,
+        # callback=callback,
+    )
+    content = extract_content(response)
+    # logger.info(f"********************************  Content: {content}")
+    # logger.info(f"********************************  Response: {response}")
+    return content
 
 
 async def translate_to_indian(query: str, callback=None) -> str:

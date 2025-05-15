@@ -80,6 +80,8 @@ EXTENTIONS = [
     "bot.statemanager",
 ]
 
+NIC_EXTENTIONS = ["bot.insulter"]
+
 
 class BaseBot(commands.Bot):
     def __init__(self, name, prefix, *args, **kwargs):
@@ -131,6 +133,10 @@ class NicBot(BaseBot):
         for task in worker_tasks:
             asyncio.create_task(task())
         logger.info(f"{self.name} setup complete")
+
+        for extension in NIC_EXTENTIONS:
+            if extension not in self.extensions:
+                await self.load_extension(extension)
 
 
 class DerfBot(BaseBot):
