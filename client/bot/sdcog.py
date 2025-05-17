@@ -52,6 +52,7 @@ class ImageGen(commands.Cog):
         self.client_id = str(uuid.uuid4())
         self.emoji = "🎨"
         self.photo_emoji = "📷"
+        self.goblin_emoji = "👺"
         self.retry_emoji = "🔄"
         self.unified_queue = asyncio.Queue()  # In-memory queue for image generation
         self.image_processing_task = self.bot.loop.create_task(
@@ -112,6 +113,20 @@ class ImageGen(commands.Cog):
                     message = data["message"]
                     photo = data["photo"]
                     await self.process_reaction(attachment_url, message, photo)
+                    # "goblin",
+                    # {
+                    # "attachment_url": attachment_url,
+                    # "message": message,
+                    # "photo": True,
+                    # },
+                elif task_type == "goblin":
+                    logger.info(f"here is my {data}")
+                    attachment_url = data["attachment_url"]
+                    message = data["message"]
+                    photo = data["photo"]
+                    await self.process_reaction(
+                        attachment_url, message, photo, goblin=True
+                    )
 
             except Exception as e:
                 logger.error(f"Error processing unified queue task: {e}")
@@ -129,6 +144,7 @@ class ImageGen(commands.Cog):
             str(self.emoji),
             str(self.photo_emoji),
             str(self.retry_emoji),
+            str(self.goblin_emoji),
         ]:
             return
 
@@ -156,49 +172,45 @@ class ImageGen(commands.Cog):
                     await self.generate_image_request(ctx, parameter=parameter)
             return
 
-        if str(reaction.emoji) in [str(self.emoji), str(self.photo_emoji)]:
+        if str(reaction.emoji) in [
+            str(self.emoji),
+            str(self.photo_emoji),
+            str(self.goblin_emoji),
+        ]:
             photo = reaction.emoji == self.photo_emoji
             if message.attachments:
                 attachment_url = message.attachments[0].url
-                await self.unified_queue.put(
-                    (
-                        "reaction",
-                        {
-                            "attachment_url": attachment_url,
-                            "message": message,
-                            "photo": photo,
-                        },
+                if reaction.emoji == str(self.goblin_emoji):
+                    await self.unified_queue.put(
+                        (
+                            "goblin",
+                            {
+                                "attachment_url": attachment_url,
+                                "message": message,
+                                "photo": photo,
+                            },
+                        )
                     )
-                )
-                logger.info("Reaction added to unified queue.")
-
-    # @commands.Cog.listener()
-    # async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
-    # if user.bot:
-    # return  # Ignore bot reactions
-
-    # if str(reaction.emoji) not in [str(self.emoji), str(self.photo_emoji)]:
-    # return
-
-    # photo = reaction.emoji == self.photo_emoji
-    # message = reaction.message
-
-    # if message.attachments:
-    # attachment_url = message.attachments[0].url
-    # await self.unified_queue.put(
-    # (
-    # "reaction",
-    # {
-    # "attachment_url": attachment_url,
-    # "message": message,
-    # "photo": photo,
-    # },
-    # )
-    # )
-    # logger.info("Reaction added to unified queue.")
+                    logger.info("Goblin request gone through")
+                else:
+                    await self.unified_queue.put(
+                        (
+                            "reaction",
+                            {
+                                "attachment_url": attachment_url,
+                                "message": message,
+                                "photo": photo,
+                            },
+                        )
+                    )
+                    logger.info("Reaction added to unified queue.")
 
     async def process_reaction(
-        self, attachment_url: str, message: discord.Message, photo: bool
+        self,
+        attachment_url: str,
+        message: discord.Message,
+        photo: bool,
+        goblin: bool = False,
     ):
         try:
             # Download the image from the attachment URL
@@ -211,9 +223,17 @@ class ImageGen(commands.Cog):
                         # Process the image
                         image = process_image_data(image_data)
                         file_path, file_name = save_image_to_input_dir(image)
-                        await self.generate_and_send_images(
-                            file_name, message, user_prompt=None, photo=photo
-                        )
+                        if goblin:
+                            await self.generate_and_send_images(
+                                file_name,
+                                message,
+                                user_prompt="Make the people in the images look like Orcs, green skin orc teeth, angry scowl",
+                                photo=photo,
+                            )
+                        else:
+                            await self.generate_and_send_images(
+                                file_name, message, user_prompt=None, photo=photo
+                            )
                     else:
                         logger.error(
                             f"Failed to download image: HTTP {response.status}"
