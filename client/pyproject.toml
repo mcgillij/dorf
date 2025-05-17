@@ -17,7 +17,7 @@ wave = "^0.0.2"
 aiohttp = "^3.11.11"
 numpy = "^2.2.1"
 discord-ext-voice-recv = { git = "https://github.com/imayhaveborkedit/discord-ext-voice-recv.git" }
-kokoro = "^0.9.2"
+kokoro = "^0.9.4"
 soundfile = "^0.13.1"
 lmstudio = "^1.2.0"
 dice = "^4.0.0"
