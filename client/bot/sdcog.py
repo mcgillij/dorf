@@ -228,7 +228,7 @@ class ImageGen(commands.Cog):
                                 file_name,
                                 message,
                                 user_prompt="Make the people in the images look like Orcs, green skin orc teeth, angry scowl",
-                                photo=photo,
+                                photo=True,  # force photo True to have the denoise set higher
                             )
                         else:
                             await self.generate_and_send_images(
