@@ -78,6 +78,7 @@ class MiscCog(commands.Cog):
         """send the url to spackmarne.com"""
         await ctx.send("<https://spackmarne.com>")
 
+    @commands.command(name="roll", aliases=["r"])
     async def roll_dice(self, ctx, *, dice_notation: str):
         """Rolls dice using standard dice notation (e.g., !roll d20, !r 2d8+4)."""
 
