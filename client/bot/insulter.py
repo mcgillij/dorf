@@ -73,15 +73,24 @@ class Insulter(commands.Cog):
         """
         cursor = self.db.cursor()
         try:
+            logger.debug("Resetting tasks to pending: selecting running tasks")
+            cursor.execute(
+                "SELECT id, status FROM scheduled_tasks WHERE status = 'running'"
+            )
+            running_tasks = cursor.fetchall()
+            logger.debug(f"Found running tasks: {running_tasks}")
             cursor.execute(
                 "UPDATE scheduled_tasks SET status = 'pending' WHERE status = 'running'"
             )
             self.db.commit()
             logger.info("All running tasks have been reset to 'pending'.")
+            cursor.execute(
+                "SELECT id, status FROM scheduled_tasks"
+            )
+            all_tasks = cursor.fetchall()
+            logger.debug(f"All tasks after reset: {all_tasks}")
         except Exception as e:
             logger.error(f"Error resetting tasks to pending: {e}")
-
-    async def stop_task(self, task_id: int):
         """Stop a running task and update its status in the database."""
         logger.info("In stop task")
         if task_id in self.running_tasks:
@@ -149,7 +158,6 @@ class Insulter(commands.Cog):
     async def before_check_tasks(self):
         logger.info("In before_check")
         self.reset_tasks_to_pending()  # Reset tasks to 'pending' on bot startup
-        await self.bot.wait_until_ready()
 
     def add_task(
         self, user_id: int, task_name: str, interval: int, status: str = "pending"
@@ -243,4 +251,4 @@ class Insulter(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Insulter(bot))
-    logger.info("NewsAgent cog loaded.")
+    logger.info("Insulter cog loaded.")

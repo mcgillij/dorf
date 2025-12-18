@@ -556,6 +556,8 @@ class FactionCog(commands.Cog):
                 # Prepare the announcement message
                 if scores:
                     winner_name, winner_symbol, winner_score = scores[0]
+                    # Guard against None scores
+                    winner_score = winner_score or 0
                     message = (
                         f":trophy: The emoji war has ended!\n\n"
                         f"🏆 **Winner:** {winner_symbol} **{winner_name}** with **{winner_score:,}** points!\n\n"
@@ -580,10 +582,12 @@ class FactionCog(commands.Cog):
                     await channel.send(message)
 
                 # Archive scores and reset war state
-                for faction_id, emoji, count, _ in scores:
+                for name, symbol, score in scores:
+                    # You need faction_id and emoji for war_history, but scores only has name, symbol, score
+                    # So, you can't insert faction_id and emoji here. Instead, just archive total score per faction.
                     c.execute(
-                        "INSERT INTO war_history (faction_id, emoji, usage_count, ended_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
-                        (faction_id, emoji, count),
+                        "INSERT INTO war_history (faction_id, usage_count, ended_at) VALUES ((SELECT id FROM factions WHERE name = ?), ?, CURRENT_TIMESTAMP)",
+                        (name, score),
                     )
                 c.execute("DELETE FROM faction_scores")
                 c.execute("UPDATE war_state SET started_at = NULL WHERE id = 1")
