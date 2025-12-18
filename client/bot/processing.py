@@ -1,5 +1,7 @@
 import json
 import logging
+import asyncio
+import uuid
 
 from bot.utilities import (
     split_message,
@@ -8,10 +10,12 @@ from bot.utilities import (
     replace_userids_with_username,
 )
 from bot.redis_client import redis_client
+from bot.pipelines.unified import RequestContext, deliver_existing_response
 from bot.constants import (
     LONG_RESPONSE_THRESHOLD,
     DERF_SUMMARIZER_QUEUE,
     NIC_SUMMARIZER_QUEUE,
+    SUMMARIZER_RESPONSE_KEY,
     DERF_RESPONSE_KEY_PREFIX,
     NIC_RESPONSE_KEY_PREFIX,
     DERF_RESPONSE_KEY,
@@ -35,7 +39,8 @@ async def queue_message_processing(ctx, message: str, queue_name: str):
     # Queue the message for processing
     # message = await replace_userids_with_username(ctx, message)
     logger.info(f"Here's the username: {ctx.author.name}")
-    redis_client.lpush(
+    await asyncio.to_thread(
+        redis_client.lpush,
         queue_name,
         json.dumps({"unique_id": unique_id, "message": f"{message}"}),
     )
@@ -67,9 +72,6 @@ async def process_response(
     logger.debug(
         f"{response_key_prefix.capitalize()}: Response after replacing userids: {response}"
     )
-    # Send the response in chunks
-    for response_chunk in split_message(response, 2000):
-        await ctx.send(response_chunk)
     # Check for voice channel users
     human_in_voice_channel = bool(
         ctx.guild.voice_client
@@ -78,20 +80,24 @@ async def process_response(
     logger.info(
         f"{response_key_prefix.capitalize()}: Are there users in voice chat?: {human_in_voice_channel}"
     )
-    # Summarize response if it's long
-    if len(response) > LONG_RESPONSE_THRESHOLD:
-        redis_client.lpush(
-            summarizer_queue,
-            json.dumps({"unique_id": unique_id, "message": response}),
-        )
-        summary_key = f"{summarizer_queue}:{unique_id}"
-        summary_response = await poll_redis_for_key(summary_key)
-        await ctx.send(summary_response)
-        if human_in_voice_channel:
-            await audio_queue_func(unique_id, [summary_response])
-    else:
-        if human_in_voice_channel:
-            await audio_queue_func(unique_id, [response])
+    await deliver_existing_response(
+        send=ctx.send,
+        response_text=response,
+        unique_id=str(unique_id),
+        summarizer_queue_name=summarizer_queue,
+        audio_queue_name=DERF_AUDIO_QUEUE
+        if response_key_prefix == DERF_RESPONSE_KEY
+        else NIC_AUDIO_QUEUE,
+        human_in_voice_channel=human_in_voice_channel,
+        ctx=RequestContext(
+            trace_id=str(uuid.uuid4()),
+            guild_id=getattr(ctx.guild, "id", None),
+            channel_id=getattr(ctx.channel, "id", None),
+            user_id=getattr(ctx.author, "id", None),
+            source="text",
+            persona="derf" if response_key_prefix == DERF_RESPONSE_KEY else "nic",
+        ),
+    )
 
 
 # Wrappers for specific response processing
@@ -120,7 +126,7 @@ async def process_audio_queue(unique_id: str, messages: list[str], queue_name: s
     """Queues messages for audio generation if users are in the voice channel."""
     index = 1
     for msg in messages:
-        redis_client.lpush(queue_name, f"{unique_id}|{index}|{msg}")
+        await asyncio.to_thread(redis_client.lpush, queue_name, f"{unique_id}|{index}|{msg}")
         index += 1
 
 

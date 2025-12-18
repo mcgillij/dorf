@@ -4,7 +4,6 @@ import asyncio
 import logging
 from pydub import AudioSegment
 import numpy as np
-from kokoro import KPipeline
 import soundfile as sf
 
 from bot.processing import redis_client
@@ -23,6 +22,26 @@ logger = logging.getLogger(__name__)
 def process_kokoro_audio(line_text, voice, output_wav):
     """Sync function to handle kokoro TTS generation and file writing."""
     try:
+        # IMPORTANT: Kokoro uses torch. On some hosts torch may try to use ROCm/CUDA
+        # and hard-abort if the GPU arch isn't supported. Default to CPU unless
+        # explicitly enabled via env vars.
+        import os
+
+        kokoro_device = os.getenv("KOKORO_DEVICE", "cpu").strip().lower()
+        kokoro_gpu = os.getenv("KOKORO_GPU")
+
+        if kokoro_device != "gpu":
+            os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+            os.environ.setdefault("HIP_VISIBLE_DEVICES", "")
+            os.environ.setdefault("ROCR_VISIBLE_DEVICES", "")
+        else:
+            if kokoro_gpu:
+                os.environ["CUDA_VISIBLE_DEVICES"] = str(kokoro_gpu)
+                os.environ["HIP_VISIBLE_DEVICES"] = str(kokoro_gpu)
+                os.environ["ROCR_VISIBLE_DEVICES"] = str(kokoro_gpu)
+
+        from kokoro import KPipeline
+
         pipeline = KPipeline(
             lang_code="a"
         )  # english #TODO: moved into the function lets see if it works, was global
@@ -50,60 +69,101 @@ def convert_wav_to_opus(wav_path, opus_path):
 async def audio_task(queue_name, playback_queue_name, tts_voice, bot_instance):
     output_dir = "/home/j/dorf/client/output/"
     loop = asyncio.get_event_loop()  # Reuse the same event loop
+    logger.info(
+        "audio_worker.start queue=%s playback_queue=%s voice=%s output_dir=%s",
+        queue_name,
+        playback_queue_name,
+        tts_voice,
+        output_dir,
+    )
     while True:
-        task_data = await loop.run_in_executor(None, redis_client.rpop, queue_name)
+        try:
+            task_data = await loop.run_in_executor(None, redis_client.rpop, queue_name)
 
-        if not task_data:
-            await asyncio.sleep(1)
-            continue
+            if not task_data:
+                await asyncio.sleep(1)
+                continue
 
-        unique_id, line_number, line_text = task_data.split("|", 2)
+            logger.info(
+                "audio_worker.dequeue queue=%s playback_queue=%s bytes=%s",
+                queue_name,
+                playback_queue_name,
+                len(task_data) if isinstance(task_data, str) else -1,
+            )
 
-        num_users = (
-            len(bot_instance.voice_clients[0].channel.members) - 1
-            if bot_instance.voice_clients
-            else 0
-        )
+            unique_id, line_number, line_text = task_data.split("|", 2)
 
-        if num_users < 1:
-            logger.info(f"Skipping audio generation for {num_users} users.")
-            continue
+            if bot_instance.voice_clients and bot_instance.voice_clients[0].channel:
+                channel = bot_instance.voice_clients[0].channel
+                member_count = len(channel.members)
+                num_users = member_count - 1
+            else:
+                channel = None
+                member_count = 0
+                num_users = 0
+
+            if num_users < 1:
+                logger.info(
+                    "audio_worker.skip_no_humans unique_id=%s users=%s member_count=%s channel=%s queue=%s",
+                    unique_id,
+                    num_users,
+                    member_count,
+                    getattr(channel, "name", None),
+                    queue_name,
+                )
+                continue
 
         # Ensure unique artifacts per request to avoid cross-talk / overwrites.
-        wav_path = os.path.join(output_dir, f"{unique_id}-{line_number}.wav")
+            wav_path = os.path.join(output_dir, f"{unique_id}-{line_number}.wav")
 
-        try:
-            await loop.run_in_executor(
-                None, process_kokoro_audio, line_text, tts_voice, wav_path
-            )
-        except Exception as e:
-            logger.error(f"Kokoro error for {line_text}: {str(e)}")
-            continue
-
-        if not os.path.exists(wav_path):
-            logger.error(f"WAV missing: {wav_path}")
-            continue
-
-        # Convert to OPUS
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".opus") as tmp_opus:
-            opus_path = tmp_opus.name
-
-            await loop.run_in_executor(None, convert_wav_to_opus, wav_path, opus_path)
-
-            # Best-effort cleanup of intermediate wav
             try:
-                if os.path.exists(wav_path):
-                    os.remove(wav_path)
-            except Exception:
-                pass
+                await loop.run_in_executor(
+                    None, process_kokoro_audio, line_text, tts_voice, wav_path
+                )
+            except Exception as e:
+                logger.exception(
+                    "audio_worker.kokoro_error unique_id=%s voice=%s err=%s",
+                    unique_id,
+                    tts_voice,
+                    e,
+                )
+                continue
 
-            # Push to playback queue without blocking
-            await loop.run_in_executor(
-                None,
-                redis_client.lpush,
-                playback_queue_name,
-                f"{unique_id}|{opus_path}",
-            )
+            if not os.path.exists(wav_path):
+                logger.error(f"WAV missing: {wav_path}")
+                continue
+
+            # Convert to OPUS
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".opus") as tmp_opus:
+                opus_path = tmp_opus.name
+
+                await loop.run_in_executor(None, convert_wav_to_opus, wav_path, opus_path)
+
+                # Best-effort cleanup of intermediate wav
+                try:
+                    if os.path.exists(wav_path):
+                        os.remove(wav_path)
+                except Exception:
+                    pass
+
+                # Push to playback queue without blocking
+                await loop.run_in_executor(
+                    None,
+                    redis_client.lpush,
+                    playback_queue_name,
+                    f"{unique_id}|{opus_path}",
+                )
+
+                logger.info(
+                    "audio_worker.enqueued_playback unique_id=%s playback_queue=%s opus_path=%s",
+                    unique_id,
+                    playback_queue_name,
+                    opus_path,
+                )
+
+        except Exception as e:
+            logger.exception("audio_worker.loop_error queue=%s err=%s", queue_name, e)
+            await asyncio.sleep(1)
 
 
 async def nic_audio_task(bot):

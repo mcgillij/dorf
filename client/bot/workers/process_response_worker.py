@@ -20,7 +20,7 @@ async def process_response_queue(queue_name, response_key_prefix, bot):
     """
     while True:
         try:
-            task_data = redis_client.rpop(queue_name)
+            task_data = await asyncio.to_thread(redis_client.rpop, queue_name)
             if not task_data:
                 await asyncio.sleep(1)
                 continue
@@ -35,10 +35,11 @@ async def process_response_queue(queue_name, response_key_prefix, bot):
             response = await bot.llm.get_response(message)
 
             # Store the response in Redis for retrieval
-            redis_client.set(f"{response_key_prefix}:{unique_id}", response)
+            await asyncio.to_thread(
+                redis_client.set, f"{response_key_prefix}:{unique_id}", response
+            )
         except Exception as e:
-            logger.error(f"{queue_name}: Error processing response queue: {e}")
-            traceback.print_exc()
+            logger.exception(f"{queue_name}: Error processing response queue: {e}")
 
 
 async def process_derf_response_queue(bot):

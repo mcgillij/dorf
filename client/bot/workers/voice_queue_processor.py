@@ -1,22 +1,20 @@
 import json
 import asyncio
 import logging
+import uuid
 from bot.redis_client import redis_client
 
-from bot.utilities import split_message
+from bot.pipelines.unified import RequestContext, run_unified_response_pipeline
 
-from bot.processing import (
-    poll_redis_for_key,
-    process_derf_audio_queue,
-    process_nic_audio_queue,
-)
+from bot.processing import process_derf_audio_queue, process_nic_audio_queue
 from bot.config import CHAT_CHANNEL_ID
 from bot.constants import (
     DERF_RESPONSE_QUEUE,
     DERF_SUMMARIZER_QUEUE,
-    LONG_RESPONSE_THRESHOLD,
     NIC_SUMMARIZER_QUEUE,
     VOICE_NIC_RESPONSE_QUEUE,
+    DERF_AUDIO_QUEUE,
+    NIC_AUDIO_QUEUE,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +39,10 @@ async def process_response_queue(
             data = json.loads(queued_item)
             unique_id = data["unique_id"]
             message = data["message"]
+            trace_id = data.get("trace_id") or str(uuid.uuid4())
+            guild_id = data.get("guild_id")
+            channel_id = data.get("channel_id")
+            user_id = data.get("user_id")
 
             # Extract the channel ID and user ID from the message
             # user_id, actual_message = message.split(":", 1)
@@ -54,25 +56,6 @@ async def process_response_queue(
             if not channel:
                 logger.info(f"Channel {fallback_channel_id} not found.")
                 continue
-            # guild = channel.guild
-
-            # Send the question the user asked back to the chat before processing response
-            for message_chunk in split_message(message, 2000):
-                await channel.send(f"{message_chunk}")
-                # await channel.send(f"{guild.get_member(user_id)}: {message_chunk}")
-
-            # Call get_response
-            response_from_llm = await bot_instance.llm.get_response(message)
-
-            # Store the response in Redis for retrieval
-            redis_client.set(f"response:{unique_id}", response_from_llm)
-
-            # Poll Redis for the response
-            response = await poll_redis_for_key(f"response:{unique_id}")
-
-            # Send the response in chunks
-            for response_chunk in split_message(response, 2000):
-                await channel.send(response_chunk)
 
             # Check for voice channel users
             voice_client = channel.guild.voice_client
@@ -83,23 +66,39 @@ async def process_response_queue(
             )
             logger.info(f"Human in voice channel: {human_in_voice_channel}")
 
-            # Summarize response if it's long
-            if len(response) > LONG_RESPONSE_THRESHOLD:
-                redis_client.lpush(
-                    summarizer_queue_name,
-                    json.dumps({"unique_id": unique_id, "message": response}),
-                )
-                summary_response = await poll_redis_for_key(f"summarizer:{unique_id}")
+            # Unified pipeline: LLM + optional summarize + optional TTS enqueue.
+            # Choose the correct audio queue based on which response queue we consumed.
+            audio_queue_name = NIC_AUDIO_QUEUE if queue_name == VOICE_NIC_RESPONSE_QUEUE else DERF_AUDIO_QUEUE
 
-                await channel.send(summary_response)
-                if human_in_voice_channel:
-                    await process_audio_func(unique_id, [summary_response])
-            else:
-                if human_in_voice_channel:
-                    await process_audio_func(unique_id, [response])
+            logger.info(
+                "voice_pipeline.dispatch trace_id=%s unique_id=%s persona=%s audio_queue=%s",
+                trace_id,
+                unique_id,
+                "nic" if queue_name == VOICE_NIC_RESPONSE_QUEUE else "derf",
+                audio_queue_name,
+            )
+
+            await run_unified_response_pipeline(
+                bot_instance=bot_instance,
+                send=channel.send,
+                prompt_text=message,
+                unique_id=str(unique_id),
+                summarizer_queue_name=summarizer_queue_name,
+                audio_queue_name=audio_queue_name,
+                human_in_voice_channel=human_in_voice_channel,
+                ctx=RequestContext(
+                    trace_id=str(trace_id),
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    user_id=user_id,
+                    source="voice",
+                    persona="nic" if queue_name == VOICE_NIC_RESPONSE_QUEUE else "derf",
+                ),
+                echo_prompt_to_chat=True,
+            )
 
         except Exception as e:
-            logger.error(f"Error in processing {queue_name}: {e}")
+            logger.exception(f"Error in processing {queue_name}: {e}")
             await asyncio.sleep(1)  # Avoid spamming on continuous errors
 
 

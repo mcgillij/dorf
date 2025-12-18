@@ -6,6 +6,7 @@ import asyncio
 import traceback
 import hashlib
 import logging
+import time
 
 import discord
 from discord.ext.voice_recv import VoiceRecvClient
@@ -106,9 +107,11 @@ def generate_unique_id(ctx, message: str) -> str:
 async def poll_redis_for_key(key: str, timeout: float = 0.5) -> str:
     """Polls Redis for a key and returns its value when found."""
     while True:
-        response = redis_client.get(key)
-        if response:
-            redis_client.delete(key)
+        response = await asyncio.to_thread(redis_client.get, key)
+        # Redis returns None when missing; empty strings are valid values and must
+        # not cause an infinite wait.
+        if response is not None:
+            await asyncio.to_thread(redis_client.delete, key)
             return response.decode("utf-8") if isinstance(response, bytes) else response
         await asyncio.sleep(timeout)
 
@@ -198,7 +201,7 @@ def split_text(text):  # This shouldn't be needed anymore since moving mostly to
     return [chunk.strip() for chunk in re.split(r"[.\n]", text) if chunk.strip()]
 
 
-async def start_capture(guild, channel, bot):
+async def start_capture(guild, channel, bot, *, force_restart: bool = False):
     logger.info(f"Starting capture in {channel.name} for bot {bot.name}")
     try:
         vc = guild.voice_client
@@ -212,11 +215,20 @@ async def start_capture(guild, channel, bot):
 
         # Avoid resetting capture on every voice join event. If we are already
         # listening, keep the existing sink to prevent intermittent dropouts.
-        if vc.is_listening():
+        # But allow a forced restart for health recovery.
+        if vc.is_listening() and not force_restart:
             logger.debug("Already listening; leaving existing sink running.")
             return
+        if vc.is_listening() and force_restart:
+            logger.warning("Force restarting capture sink.")
+            try:
+                vc.stop_listening()
+            except Exception:
+                pass
 
         ring_buffer_sink = RingBufferAudioSink(bot=bot, buffer_size=1024 * 1024)
+        # Expose for watchdog/debug
+        bot.voice_capture_sink = ring_buffer_sink
         vc.listen(ring_buffer_sink)
         logger.info(f"Recording started in channel {channel.name}")
 
@@ -227,7 +239,7 @@ async def start_capture(guild, channel, bot):
         logger.error(f"Error in start_capture: {e}")
 
 
-async def connect_to_voice(bot):
+async def connect_to_voice(bot, *, force_reconnect: bool = False):
     logger.info(f"BOT STARTING in connect_to_voice: {bot}")
     try:
         guild_id = int(os.getenv("GUILD_ID", ""))
@@ -256,6 +268,14 @@ async def connect_to_voice(bot):
     current_vc = next((vc for vc in bot.voice_clients if vc.guild == guild), None)
 
     try:
+        if force_reconnect and current_vc:
+            logger.warning("Force reconnect requested; disconnecting voice client.")
+            try:
+                await current_vc.disconnect(force=True)
+            except Exception:
+                pass
+            current_vc = None
+
         if not current_vc:
             await voice_channel.connect(cls=VoiceRecvClient)
             logger.info(f"Connected to {voice_channel.name}")
@@ -285,3 +305,75 @@ async def connect_to_voice(bot):
                 logger.debug("Already connected to the correct channel.")
     except Exception as e:
         logger.exception(f"Connection error: {str(e)}")
+
+
+async def voice_capture_watchdog(
+    bot,
+    *,
+    check_interval_seconds: float = 10.0,
+    stale_seconds: float = 20.0,
+):
+    """Best-effort watchdog.
+
+    If discord.ext.voice_recv hits an internal Opus decode failure (e.g. "corrupted stream"),
+    the packet router thread can die and capture can silently stop. This watchdog detects
+    stale audio delivery and forces a reconnect + sink restart.
+    """
+
+    while True:
+        try:
+            await asyncio.sleep(check_interval_seconds)
+
+            try:
+                guild_id = int(os.getenv("GUILD_ID", "0"))
+                voice_channel_id = int(os.getenv("VOICE_CHANNEL_ID", "0"))
+            except ValueError:
+                continue
+
+            if not guild_id or not voice_channel_id:
+                continue
+
+            guild = discord.utils.get(bot.guilds, id=guild_id)
+            if not guild:
+                continue
+
+            channel = guild.get_channel(voice_channel_id)
+            if not isinstance(channel, discord.VoiceChannel):
+                continue
+
+            vc = guild.voice_client
+            if not vc or not vc.is_connected():
+                continue
+
+            if not vc.is_listening():
+                continue
+
+            # If there are no humans, don't churn connections.
+            has_humans = any(not m.bot for m in channel.members)
+            if not has_humans:
+                continue
+
+            sink = getattr(bot, "voice_capture_sink", None)
+            if not sink:
+                continue
+
+            last_packet_time = getattr(sink, "last_packet_time", 0.0) or 0.0
+            age = time.time() - last_packet_time if last_packet_time else 999999
+
+            logger.debug(
+                "voice_capture_watchdog: listening=%s humans=%s last_packet_age_s=%s",
+                True,
+                has_humans,
+                int(age),
+            )
+
+            if age > stale_seconds:
+                logger.warning(
+                    "voice_capture_watchdog: stale capture detected (age_s=%s). Reconnecting + restarting capture.",
+                    int(age),
+                )
+                await connect_to_voice(bot, force_reconnect=True)
+                await start_capture(guild, channel, bot, force_restart=True)
+
+        except Exception as e:
+            logger.exception(f"voice_capture_watchdog error: {e}")

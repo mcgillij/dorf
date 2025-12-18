@@ -4,25 +4,22 @@ version = "0.1.0"
 description = ""
 authors = ["mcgillij <mcgillivray.jason@gmail.com>"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
-python = ">=3.12.0,<3.13"
+python = ">=3.13.0,<3.14"
 discord-py = "^2.4.0"
 redis = "^5.2.1"
 pydub = "^0.25.1"
 pynacl = "^1.5.0"
 python-dotenv = "^1.0.1"
 pyaudio = "^0.2.14"
-wave = "^0.0.2"
 aiohttp = "^3.11.11"
 numpy = "^2.2.1"
 discord-ext-voice-recv = { git = "https://github.com/imayhaveborkedit/discord-ext-voice-recv.git" }
-kokoro = "^0.9.4"
 soundfile = "^0.13.1"
 lmstudio = "*"
 dice = "^4.0.0"
-torch = {version = "^2.6.0", source = "rocm_torch"}
-pytorch-triton-rocm = {version = "^3.2.0", source = "rocm_torch"}
 emoji = "^2.14.1"
 pandas = "^2.2.3"
 matplotlib = "^3.10.1"
@@ -33,16 +30,34 @@ pillow = "^11.2.1"
 websockets = "^15.0.1"
 rapidfuzz = "^3.13.0"
 
+loguru = "^0.7.3"
+
+
+[tool.poetry.group.tts.dependencies]
+# Kokoro currently depends on `misaki`, which (as of 0.9.4) declares `Python < 3.13`.
+# Since this project now targets Python 3.13, keep the Kokoro stack gated so `poetry lock`
+# works for the main environment.
+#
+# If/when misaki (and kokoro) support Python 3.13, we can remove the `python = "<3.13"`
+# constraints below.
+#
+# Kokoro also depends on `torch = "*"` and will cause Poetry to pull a PyPI CUDA build.
+# On Arch/ROCm, prefer installing Kokoro manually:
+#   `poetry run pip install --no-deps kokoro==0.9.4`
+# so it uses your system `python-pytorch-opt-rocm`.
+transformers = { version = "*", python = "<3.13" }
+huggingface-hub = { version = "*", python = "<3.13" }
+misaki = { version = ">=0.9.4", python = "<3.13" }
+espeakng-loader = { version = "^0.2.4", python = "<3.13" }
+phonemizer-fork = { version = "^3.3.2", python = "<3.13" }
+num2words = { version = "^0.5.14", python = "<3.13" }
+spacy = { version = "^3.8.0", python = "<3.13" }
+
 
 [tool.poetry.group.dev.dependencies]
 watchdog = "^6.0.0"
 black = "^25.1.0"
 
-
-[[tool.poetry.source]]
-name = "rocm_torch"
-url = "https://download.pytorch.org/whl/rocm6.2.4"
-priority = "explicit"
 
 [build-system]
 requires = ["poetry-core"]

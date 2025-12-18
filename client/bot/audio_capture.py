@@ -88,6 +88,7 @@ class RingBufferAudioSink(AudioSink):
         self.max_chunk_seconds = max_chunk_seconds
         self.last_check_time = {}
         self.last_audio_time: Dict[int, float] = {}
+        self.last_packet_time: float = 0.0
         self.chunk_start_time: Dict[int, float] = {}
         self.user_context: Dict[int, Dict[str, int]] = {}
         self.processing_locks: Dict[int, asyncio.Lock] = {}
@@ -99,6 +100,7 @@ class RingBufferAudioSink(AudioSink):
     def write(self, member, data: VoiceData):
         try:
             current_time = time.time()
+            self.last_packet_time = current_time
             user_id = member.id if member else None
             if not user_id:
                 return
@@ -227,6 +229,14 @@ def save_audio(user_id: int, pcm_data, output_dir: str) -> str:
         original_path = os.path.join(user_dir, f"chunk-{chunk_id}-original.wav")
         converted_path = os.path.join(user_dir, f"chunk-{chunk_id}.wav")
 
+        logger.info(
+            "save_audio: user_id=%s pcm_bytes=%s original_path=%s converted_path=%s",
+            user_id,
+            len(pcm_data) if pcm_data else 0,
+            original_path,
+            converted_path,
+        )
+
         logger.info(f"Saving original audio to {original_path}")
         with wave.open(original_path, "wb") as wav_file:
             wav_file.setnchannels(2)
@@ -234,17 +244,62 @@ def save_audio(user_id: int, pcm_data, output_dir: str) -> str:
             wav_file.setframerate(48000)
             wav_file.writeframes(pcm_data)
 
-        logger.info("Converting audio to Whisper format")
+        try:
+            original_size = os.path.getsize(original_path)
+        except OSError:
+            original_size = None
+
+        logger.info(
+            "save_audio: wrote original wav size_bytes=%s channels=%s sample_width=%s framerate=%s",
+            original_size,
+            2,
+            2,
+            48000,
+        )
+
+        logger.info(
+            "Converting audio to Whisper format (pydub converter=%s ffmpeg=%s)",
+            getattr(AudioSegment, "converter", None),
+            getattr(AudioSegment, "ffmpeg", None),
+        )
         audio = AudioSegment.from_file(original_path, format="wav")
-        audio.set_channels(1).set_frame_rate(16000).export(
-            converted_path, format="wav", codec="pcm_s16le"
+        logger.info(
+            "save_audio: decoded original duration_ms=%s channels=%s frame_rate=%s sample_width=%s dBFS=%s rms=%s",
+            len(audio),
+            audio.channels,
+            audio.frame_rate,
+            audio.sample_width,
+            getattr(audio, "dBFS", None),
+            getattr(audio, "rms", None),
+        )
+
+        converted_audio = audio.set_channels(1).set_frame_rate(16000)
+        logger.info(
+            "save_audio: converted target duration_ms=%s channels=%s frame_rate=%s sample_width=%s",
+            len(converted_audio),
+            converted_audio.channels,
+            converted_audio.frame_rate,
+            converted_audio.sample_width,
+        )
+
+        converted_audio.export(converted_path, format="wav", codec="pcm_s16le")
+
+        try:
+            converted_size = os.path.getsize(converted_path)
+        except OSError:
+            converted_size = None
+
+        logger.info(
+            "save_audio: wrote converted wav size_bytes=%s path=%s",
+            converted_size,
+            converted_path,
         )
 
         os.remove(original_path)
         logger.info(f"Successfully saved and converted audio to {converted_path}")
         return converted_path
     except Exception as e:
-        logger.error(f"Error in save_audio: {e}")
+        logger.exception(f"Error in save_audio: {e}")
         return None
 
 

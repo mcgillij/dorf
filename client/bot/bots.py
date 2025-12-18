@@ -12,7 +12,13 @@ from bot.processing import (
     process_derf_response,
     process_nic_response,
 )
-from bot.utilities import filter_message, LLMClient, start_capture, connect_to_voice
+from bot.utilities import (
+    filter_message,
+    LLMClient,
+    start_capture,
+    connect_to_voice,
+    voice_capture_watchdog,
+)
 
 from bot.workers.process_response_worker import (
     process_derf_response_queue,
@@ -198,6 +204,10 @@ class DerfBot(BaseBot):
             logger.info("StateManager successfully loaded.")
 
         await connect_to_voice(self)
+
+        # Capture health watchdog (recovers from voice_recv Opus decode failures).
+        asyncio.create_task(voice_capture_watchdog(self))
+
         worker_tasks = [
             lambda: derf_audio_task(self),
             lambda: playback_derf_task(self),
