@@ -1,4 +1,3 @@
-from discord.ext import tasks
 import json
 import asyncio
 import logging
@@ -30,11 +29,11 @@ async def process_response_queue(
     logger.info(f"Monitoring {queue_name}...")
     while True:
         try:
-            # Fetch an item from the Redis response queue
-            queued_item = redis_client.rpop(queue_name)
-            if queued_item is None:
-                await asyncio.sleep(1)  # No items in the queue, wait and retry
+            # Block for work (in a thread) so we don't poll/sleep.
+            result = await asyncio.to_thread(redis_client.blpop, queue_name, 30)
+            if not result or len(result) < 2:
                 continue
+            _, queued_item = result
 
             logger.info(f"Received queued item from {queue_name}: {queued_item}")
 
@@ -104,7 +103,6 @@ async def process_response_queue(
             await asyncio.sleep(1)  # Avoid spamming on continuous errors
 
 
-@tasks.loop(seconds=1)
 async def monitor_nic_response_queue(bot):
     """Monitor the Redis voice response queue for Nic."""
     await process_response_queue(
@@ -115,7 +113,6 @@ async def monitor_nic_response_queue(bot):
     )
 
 
-@tasks.loop(seconds=1)
 async def monitor_derf_response_queue(bot):
     """Monitor the Redis voice response queue."""
     await process_response_queue(

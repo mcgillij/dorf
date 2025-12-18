@@ -8,6 +8,7 @@ import threading
 from typing import Dict
 import asyncio
 import logging
+import uuid
 
 from pydub import AudioSegment
 import discord
@@ -71,13 +72,24 @@ class RingBuffer:
 
 
 class RingBufferAudioSink(AudioSink):
-    def __init__(self, bot, buffer_size=1024 * 1024, output_dir="user_audio"):
+    def __init__(
+        self,
+        bot,
+        buffer_size=1024 * 1024,
+        output_dir="user_audio",
+        silence_seconds: float = 0.3,
+        max_chunk_seconds: float = 10.0,
+    ):
         self.bot = bot  # Store bot instance for access to the loop
         self.ring_buffers = {}
         self.buffer_size = buffer_size
         self.output_dir = output_dir
+        self.silence_seconds = silence_seconds
+        self.max_chunk_seconds = max_chunk_seconds
         self.last_check_time = {}
         self.last_audio_time: Dict[int, float] = {}
+        self.chunk_start_time: Dict[int, float] = {}
+        self.user_context: Dict[int, Dict[str, int]] = {}
         self.processing_locks: Dict[int, asyncio.Lock] = {}
         self.save_task = None
         self.ssrc_to_user: Dict[int, int] = {}  # Map SSRC to user ID
@@ -91,6 +103,17 @@ class RingBufferAudioSink(AudioSink):
             if not user_id:
                 return
 
+            # Capture context for downstream routing/observability
+            try:
+                if member and member.guild and member.voice and member.voice.channel:
+                    self.user_context[user_id] = {
+                        "guild_id": member.guild.id,
+                        "channel_id": member.voice.channel.id,
+                    }
+            except Exception:
+                # Best-effort only
+                pass
+
             if user_id not in self.processing_locks:
                 self.processing_locks[user_id] = asyncio.Lock()
 
@@ -98,6 +121,7 @@ class RingBufferAudioSink(AudioSink):
                 logger.info(f"Creating new buffer for user {user_id}")
                 self.ring_buffers[user_id] = RingBuffer(self.buffer_size)
                 self.last_check_time[user_id] = current_time
+                self.chunk_start_time[user_id] = current_time
 
             self.ring_buffers[user_id].write(data.pcm)
             self.last_audio_time[user_id] = current_time
@@ -117,8 +141,16 @@ class RingBufferAudioSink(AudioSink):
             while True:
                 current_time = time.time()
                 for user_id, last_time in list(self.last_audio_time.items()):
-                    # If we haven't received audio for 0.5 seconds (adjust as needed)
-                    if current_time - last_time > 0.3:
+                    silence_elapsed = current_time - last_time
+                    chunk_elapsed = current_time - self.chunk_start_time.get(
+                        user_id, last_time
+                    )
+
+                    # Flush on silence or on max duration (handles continuous speech)
+                    if (
+                        silence_elapsed > self.silence_seconds
+                        or chunk_elapsed > self.max_chunk_seconds
+                    ):
                         if (
                             user_id in self.ring_buffers
                             and not self.ring_buffers[user_id].is_empty()
@@ -130,6 +162,7 @@ class RingBufferAudioSink(AudioSink):
                                         None, self.save_user_audio, user_id
                                     )
                             del self.last_audio_time[user_id]
+                            self.chunk_start_time[user_id] = current_time
 
                 # If no active audio streams, end the task
                 if not self.last_audio_time:
@@ -150,9 +183,20 @@ class RingBufferAudioSink(AudioSink):
             if pcm_data:
                 logger.info(f"Got PCM data of length {len(pcm_data)}")
                 converted_path = save_audio(user_id, pcm_data, self.output_dir)
+                if not converted_path:
+                    logger.error("Failed to save/convert audio; skipping enqueue.")
+                    ring_buffer.clear()
+                    return
+
+                payload = {
+                    "user_id": user_id,
+                    "audio_path": converted_path,
+                    "trace_id": str(uuid.uuid4()),
+                }
+                payload.update(self.user_context.get(user_id, {}))
                 redis_client.lpush(
                     "whisper_queue",
-                    json.dumps({"user_id": user_id, "audio_path": converted_path}),
+                    json.dumps(payload),
                 )
                 logger.info(f"Saved audio to {converted_path}")
             else:
@@ -176,8 +220,12 @@ class RingBufferAudioSink(AudioSink):
 def save_audio(user_id: int, pcm_data, output_dir: str) -> str:
     try:
         os.makedirs(output_dir, exist_ok=True)
-        original_path = os.path.join(output_dir, f"{user_id}-original.wav")
-        converted_path = os.path.join(output_dir, f"{user_id}.wav")
+        user_dir = os.path.join(output_dir, str(user_id))
+        os.makedirs(user_dir, exist_ok=True)
+
+        chunk_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex}"
+        original_path = os.path.join(user_dir, f"chunk-{chunk_id}-original.wav")
+        converted_path = os.path.join(user_dir, f"chunk-{chunk_id}.wav")
 
         logger.info(f"Saving original audio to {original_path}")
         with wave.open(original_path, "wb") as wav_file:

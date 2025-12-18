@@ -21,126 +21,126 @@ db.create_table()
 
 
 class WhisperClient:
+    def __init__(self, session: aiohttp.ClientSession):
+        self._session = session
+
     async def get_text(self, audio_file_path: str) -> str:
         url = f"http://127.0.0.1:8080/inference"
         headers = {
             "accept": "application/json",
         }
-        files = {"file": open(audio_file_path, "rb")}
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.post(url, headers=headers, data=files) as response:
+        try:
+            form = aiohttp.FormData()
+            with open(audio_file_path, "rb") as f:
+                form.add_field(
+                    "file",
+                    f,
+                    filename=os.path.basename(audio_file_path),
+                    content_type="audio/wav",
+                )
+                async with self._session.post(url, headers=headers, data=form) as response:
                     if response.status == 200:
                         json_response = await response.json()
                         return json_response.get("text", "")
-                    else:
-                        logger.info(
-                            f"Error: {response.status} - {await response.text()}"
-                        )
-                        return ""
-            except asyncio.TimeoutError:
-                logger.info("Request timed out.")
-                return "The whisper request timed out. Please try again later."
-            except Exception as e:
-                logger.info(f"Exception during API call: {e}")
-                import traceback
+                    logger.info(f"Error: {response.status} - {await response.text()}")
+                    return ""
+        except asyncio.TimeoutError:
+            logger.info("Request timed out.")
+            return ""
+        except Exception as e:
+            logger.info(f"Exception during API call: {e}")
+            import traceback
 
-                traceback.print_exc()
-                return "An error occurred while processing the request. Please try again later."
+            traceback.print_exc()
+            return ""
 
 
 class WhisperWorker:
-    def process_audio(self):
+    async def process_audio(self):
         """Process audio paths from the Redis queue."""
         # Connect to Redis
         logger.info(f"Connecting to Redis")
         if not redis_client.ping():
             raise ConnectionError("Failed to connect to Redis.")
         logger.info("Connected to Redis successfully.")
-        while True:
-            try:
-                # Get a blocking pop from the queue (blocking until an item is available)
-                path_data = redis_client.blpop(
-                    WHISPER_QUEUE, timeout=30
-                )  # Timeout of 30 seconds
-                if not path_data or len(path_data) < 2:
-                    continue
-                key, raw_value = path_data  # Unpack the tuple correctly
-                logger.info(f"Received key: {key}, Raw Value: {raw_value}")
-                # Extract the audio_path and user_id from the Redis value
+        timeout = aiohttp.ClientTimeout(total=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            whisper_client = WhisperClient(session)
+            while True:
                 try:
-                    path_info = json.loads(raw_value)
+                    # Block in a worker thread so we don't block the asyncio loop.
+                    path_data = await asyncio.to_thread(
+                        redis_client.blpop, WHISPER_QUEUE, 30
+                    )
+                    if not path_data or len(path_data) < 2:
+                        continue
+
+                    key, raw_value = path_data
+                    logger.info(f"Received key: {key}")
+
+                    try:
+                        path_info = json.loads(raw_value)
+                    except json.JSONDecodeError as e:
+                        logger.info(f"Failed to decode JSON from Redis: {e}")
+                        continue
+
                     user_id = path_info.get("user_id")
                     audio_path = path_info.get("audio_path")
+                    trace_id = path_info.get("trace_id")
+                    guild_id = path_info.get("guild_id")
+                    channel_id = path_info.get("channel_id")
+
                     if not user_id or not audio_path:
-                        logger.info(
-                            "No valid user_id or audio_path in the received data."
-                        )
+                        logger.info("No valid user_id or audio_path in the received data.")
                         continue
-                    logger.info(f"Processing {audio_path} for user_id: {user_id}...")
-                    # Ensure WhisperClient.get_text is called within an event loop context
-                    text_response = asyncio.run(self._get_text_from_audio(audio_path))
-                    if text_response:
-                        logger.debug(f"{user_id}: {text_response}")
-                        if bot_name_pattern.search(text_response):
-                            logger.info(f"replying_to: {text_response}")
-                            unique_id = randint(
-                                100000, 999999
-                            )  # Generate a random unique ID
-                            redis_client.lpush(
-                                VOICE_RESPONSE_QUEUE,
-                                json.dumps(
-                                    {
-                                        "unique_id": str(unique_id),
-                                        "message": f"{text_response.strip()}",
-                                        # "message": f"{user_id}: {text_response.strip()}",
-                                    }
-                                ),
-                            )
-                            logger.info(f"Pushed response to Redis queue.")
-                            # now we can remove the audio file
-                        elif nic_bot_name_pattern.search(text_response):
-                            logger.info(f"replying_to: {text_response}")
-                            unique_id = randint(
-                                100000, 999999
-                            )  # Generate a random unique ID
-                            redis_client.lpush(
-                                VOICE_NIC_RESPONSE_QUEUE,
-                                json.dumps(
-                                    {
-                                        "unique_id": str(unique_id),
-                                        "message": f"{text_response.strip()}",
-                                        # "message": f"{user_id}: {text_response.strip()}",
-                                    }
-                                ),
-                            )
-                            logger.info(f"Pushed response to Redis queue.")
-                            # now we can remove the audio file
-                        else:
-                            logger.info(
-                                f"No bot name found in text response: {text_response}"
-                            )
-                        os.remove(audio_path)
-                        db.insert_entry(user_id, text_response.strip())
 
-                    else:
+                    logger.info(
+                        f"Processing audio for user_id={user_id} trace_id={trace_id} guild_id={guild_id} channel_id={channel_id}"
+                    )
+
+                    text_response = await whisper_client.get_text(audio_path)
+                    if not text_response:
                         logger.info("No text response received.")
-                except json.JSONDecodeError as e:
-                    logger.info(f"Failed to decode JSON from Redis: {e}")
-            except Exception as e:
-                logger.info(f"Exception during processing: {e}")
+                        # Keep the audio file for debugging if whisper returns nothing
+                        continue
 
-    async def _get_text_from_audio(self, audio_path):
-        """Get text from the given audio path using WhisperClient."""
-        whisper_client = WhisperClient()
-        return await whisper_client.get_text(audio_path)
+                    text_response = text_response.strip()
+                    db.insert_entry(user_id, text_response)
+
+                    payload = {
+                        "unique_id": str(randint(100000, 999999)),
+                        "message": text_response,
+                    }
+                    # Carry metadata forward for multi-guild routing later.
+                    if trace_id:
+                        payload["trace_id"] = trace_id
+                    if guild_id:
+                        payload["guild_id"] = guild_id
+                    if channel_id:
+                        payload["channel_id"] = channel_id
+                    payload["user_id"] = user_id
+
+                    if bot_name_pattern.search(text_response):
+                        redis_client.lpush(VOICE_RESPONSE_QUEUE, json.dumps(payload))
+                        logger.info("Pushed response to voice_response_queue")
+                        if os.path.exists(audio_path):
+                            os.remove(audio_path)
+                    elif nic_bot_name_pattern.search(text_response):
+                        redis_client.lpush(VOICE_NIC_RESPONSE_QUEUE, json.dumps(payload))
+                        logger.info("Pushed response to voice_nic_response_queue")
+                        if os.path.exists(audio_path):
+                            os.remove(audio_path)
+                    else:
+                        logger.info(f"No bot name found in transcript: {text_response}")
+                        # Keep audio file if we didn't route it.
+
+                except Exception as e:
+                    logger.info(f"Exception during processing: {e}")
 
 
 def main():
     worker = WhisperWorker()
-    asyncio.run(
-        worker.process_audio(),
-    )  # Run the process_audio method within an event loop
+    asyncio.run(worker.process_audio())
 
 
 if __name__ == "__main__":

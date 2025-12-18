@@ -210,21 +210,18 @@ async def start_capture(guild, channel, bot):
             logger.error("Failed to connect to voice, aborting capture.")
             return
 
+        # Avoid resetting capture on every voice join event. If we are already
+        # listening, keep the existing sink to prevent intermittent dropouts.
         if vc.is_listening():
-            logger.info("Already listening, resetting sink...")
-            vc.stop_listening()
+            logger.debug("Already listening; leaving existing sink running.")
+            return
 
         ring_buffer_sink = RingBufferAudioSink(bot=bot, buffer_size=1024 * 1024)
         vc.listen(ring_buffer_sink)
         logger.info(f"Recording started in channel {channel.name}")
-        logger.info(f"Sweeping channel {channel.name} for existing members...")
-        for member in channel.members:
-            if member.bot:
-                continue
-            logger.info(
-                f"Detected existing member {member.display_name}. Initializing capture."
-            )
-            await bot.handle_voice_state_update(member, None, member.voice)
+
+        # Note: the sink receives all members by default; we do not need per-member
+        # initialization here.
 
     except Exception as e:
         logger.error(f"Error in start_capture: {e}")
@@ -263,6 +260,17 @@ async def connect_to_voice(bot):
             await voice_channel.connect(cls=VoiceRecvClient)
             logger.info(f"Connected to {voice_channel.name}")
         else:
+            # Enforce VoiceRecvClient so receive/capture continues to work even
+            # after reconnects initiated elsewhere.
+            if not isinstance(current_vc, VoiceRecvClient):
+                logger.warning(
+                    "Existing voice client is not VoiceRecvClient; reconnecting with VoiceRecvClient."
+                )
+                await current_vc.disconnect(force=True)
+                await voice_channel.connect(cls=VoiceRecvClient)
+                logger.info(f"Reconnected to {voice_channel.name}")
+                return
+
             # Check if already connected to the correct channel
             if current_vc.channel.id != voice_channel.id:
                 # Move existing client or reconnect?

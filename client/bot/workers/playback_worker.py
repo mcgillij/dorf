@@ -5,6 +5,7 @@ import logging
 from bot.constants import DERF_PLAYBACK_QUEUE, NIC_PLAYBACK_QUEUE
 from bot.redis_client import redis_client
 from bot.config import VOICE_CHANNEL_ID
+from bot.utilities import connect_to_voice
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,8 @@ async def playback_task(bot_instance, queue_name, voice_channel_id):
             if not voice_client or not voice_client.is_connected():
                 logger.info("Voice client not connected. Attempting to reconnect...")
                 try:
-                    voice_client = await channel.connect()
+                    await connect_to_voice(bot_instance)
+                    voice_client = discord.utils.get(bot_instance.voice_clients, guild=guild)
                 except discord.ClientException as e:
                     logger.error(f"Error connecting to voice channel: {e}")
                     continue

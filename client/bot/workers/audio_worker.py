@@ -69,7 +69,8 @@ async def audio_task(queue_name, playback_queue_name, tts_voice, bot_instance):
             logger.info(f"Skipping audio generation for {num_users} users.")
             continue
 
-        wav_path = os.path.join(output_dir, f"{line_number}.wav")
+        # Ensure unique artifacts per request to avoid cross-talk / overwrites.
+        wav_path = os.path.join(output_dir, f"{unique_id}-{line_number}.wav")
 
         try:
             await loop.run_in_executor(
@@ -88,6 +89,13 @@ async def audio_task(queue_name, playback_queue_name, tts_voice, bot_instance):
             opus_path = tmp_opus.name
 
             await loop.run_in_executor(None, convert_wav_to_opus, wav_path, opus_path)
+
+            # Best-effort cleanup of intermediate wav
+            try:
+                if os.path.exists(wav_path):
+                    os.remove(wav_path)
+            except Exception:
+                pass
 
             # Push to playback queue without blocking
             await loop.run_in_executor(

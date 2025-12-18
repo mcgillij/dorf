@@ -171,8 +171,9 @@ class DerfBot(BaseBot):
                 await start_capture(member.guild, after.channel, self)
 
     async def on_voice_state_update(self, member, before, after):
-        if member.bot:
-            # Ignore bot events
+        # Ignore other bots, but do process our own voice-state changes so we can
+        # restart capture/reconnect when Discord moves/disconnects us.
+        if member.bot and member != self.user:
             return
         await self.handle_voice_state_update(member=member, before=before, after=after)
 
