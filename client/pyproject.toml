@@ -19,7 +19,7 @@ numpy = "^2.2.1"
 discord-ext-voice-recv = { git = "https://github.com/imayhaveborkedit/discord-ext-voice-recv.git" }
 kokoro = "^0.9.4"
 soundfile = "^0.13.1"
-lmstudio = "^1.2.0"
+lmstudio = "*"
 dice = "^4.0.0"
 torch = {version = "^2.6.0", source = "rocm_torch"}
 pytorch-triton-rocm = {version = "^3.2.0", source = "rocm_torch"}

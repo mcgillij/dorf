@@ -22,15 +22,21 @@ async def wrap_model_to_indian_translate(
         "you translate the text from english to indian marathi language. no preamble / notes",
     )
     chat.add_user_message(query)
-    result = await loop.run_in_executor(
-        None,
-        lambda: model.respond(
-            chat,
-            on_message=chat.append,
-        ),
-    )
-
-    return result  # assuming this is text
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: model.respond(
+                chat,
+                on_message=chat.append,
+            ),
+        )
+        return result  # assuming this is text
+    except Exception as e:
+        logger.error(f"Error in wrap_model_to_indian_translate: {e}")
+        if "bosToken" in str(e) or "ValidationError" in str(e):
+            logger.error("Model configuration error: The LMStudio model is missing required prompt template fields.")
+            return "Error: Model configuration issue. Please check your LMStudio model configuration."
+        raise
 
 
 async def wrap_model_qa_insult(model) -> str:
@@ -41,15 +47,21 @@ async def wrap_model_qa_insult(model) -> str:
         "You come up with 1 sick burn / insult aimed at someone's QA skills (pytest, bdd, selenium, etc). no preamble / notes, just 1 burn",
     )
     # chat.add_user_message(query)
-    result = await loop.run_in_executor(
-        None,
-        lambda: model.respond(
-            chat,
-            on_message=chat.append,
-        ),
-    )
-
-    return result  # assuming this is text
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: model.respond(
+                chat,
+                on_message=chat.append,
+            ),
+        )
+        return result  # assuming this is text
+    except Exception as e:
+        logger.error(f"Error in wrap_model_qa_insult: {e}")
+        if "bosToken" in str(e) or "ValidationError" in str(e):
+            logger.error("Model configuration error: The LMStudio model is missing required prompt template fields.")
+            return "Error: Model configuration issue. Please check your LMStudio model configuration."
+        raise
 
 
 async def wrap_model_from_indian_translate(
@@ -62,15 +74,21 @@ async def wrap_model_from_indian_translate(
         "you translate the text from the indian marathi language to english. no preamble / notes",
     )
     chat.add_user_message(query)
-    result = await loop.run_in_executor(
-        None,
-        lambda: model.respond(
-            chat,
-            on_message=chat.append,
-        ),
-    )
-
-    return result  # assuming this is text
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: model.respond(
+                chat,
+                on_message=chat.append,
+            ),
+        )
+        return result  # assuming this is text
+    except Exception as e:
+        logger.error(f"Error in wrap_model_from_indian_translate: {e}")
+        if "bosToken" in str(e) or "ValidationError" in str(e):
+            logger.error("Model configuration error: The LMStudio model is missing required prompt template fields.")
+            return "Error: Model configuration issue. Please check your LMStudio model configuration."
+        raise
 
 
 async def wrap_model(model, query, on_message=None, callback=None) -> str:
@@ -81,15 +99,21 @@ async def wrap_model(model, query, on_message=None, callback=None) -> str:
         "You summarize the most relevant context information based on the query, bullet points are preferred. no preamble / notes",
     )
     chat.add_user_message(query)
-    result = await loop.run_in_executor(
-        None,
-        lambda: model.respond(
-            chat,
-            on_message=chat.append,
-        ),
-    )
-
-    return result  # assuming this is text
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: model.respond(
+                chat,
+                on_message=chat.append,
+            ),
+        )
+        return result  # assuming this is text
+    except Exception as e:
+        logger.error(f"Error in wrap_model: {e}")
+        if "bosToken" in str(e) or "ValidationError" in str(e):
+            logger.error("Model configuration error: The LMStudio model is missing required prompt template fields. Please check the model configuration in LMStudio.")
+            return "Error: Model configuration issue. The model's prompt template is missing required fields (bosToken). Please check your LMStudio model configuration."
+        raise
 
 
 async def wrap_model_act(model, query, tools, on_message=None, callback=None) -> str:
@@ -103,24 +127,31 @@ async def wrap_model_act(model, query, tools, on_message=None, callback=None) ->
         logger.info(f"-----------------------> Appending: {param=}")
         search_results.append(param)
 
-    await loop.run_in_executor(
-        None,
-        lambda: model.act(
-            query,
-            tools,
-            on_message=append_search,
-            # max_prediction_rounds=MAX_PREDICTION_ROUNDS,
-            # on_round_start=callback,
-            # on_round_end=callback,
-            # on_prediction_completed=callback,
-        ),
-    )
-    logger.info(f"********************** {search_results=}")
-    parsed_result = parse_all_texts(search_results)
-    # parsed_result = parse_search_result(search_results)
+    try:
+        await loop.run_in_executor(
+            None,
+            lambda: model.act(
+                query,
+                tools,
+                on_message=append_search,
+                # max_prediction_rounds=MAX_PREDICTION_ROUNDS,
+                # on_round_start=callback,
+                # on_round_end=callback,
+                # on_prediction_completed=callback,
+            ),
+        )
+        logger.info(f"********************** {search_results=}")
+        parsed_result = parse_all_texts(search_results)
+        # parsed_result = parse_search_result(search_results)
 
-    logger.info(f"********************** {parsed_result=}")
-    return parsed_result
+        logger.info(f"********************** {parsed_result=}")
+        return parsed_result
+    except Exception as e:
+        logger.error(f"Error in wrap_model_act: {e}")
+        if "bosToken" in str(e) or "ValidationError" in str(e):
+            logger.error("Model configuration error: The LMStudio model is missing required prompt template fields. Please check the model configuration in LMStudio.")
+            return "Error: Model configuration issue. The model's prompt template is missing required fields (bosToken). Please check your LMStudio model configuration."
+        raise
 
 
 async def qa_insult() -> str:
