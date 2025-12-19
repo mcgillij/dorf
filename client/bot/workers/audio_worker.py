@@ -14,6 +14,7 @@ from bot.constants import (
     NIC_PLAYBACK_QUEUE,
     TTS_VOICE,
     TTS_VOICE_NICOLE,
+    VOICE_STOP_KEY_PREFIX,
 )
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,33 @@ async def audio_task(queue_name, playback_queue_name, tts_voice, bot_instance):
 
             unique_id, line_number, line_text = task_data.split("|", 2)
 
+            # If a recent stop/shutup was issued for this channel, drop pending speech.
+            try:
+                if bot_instance.voice_clients and bot_instance.voice_clients[0].channel:
+                    vc_channel = bot_instance.voice_clients[0].channel
+                    gid = vc_channel.guild.id
+                    cid = vc_channel.id
+                    persona = "nic" if queue_name == NIC_AUDIO_QUEUE else "derf"
+                    stop_keys = [
+                        f"{VOICE_STOP_KEY_PREFIX}:{gid}:{cid}:all",
+                        f"{VOICE_STOP_KEY_PREFIX}:{gid}:{cid}:{persona}",
+                    ]
+                    stopped = False
+                    for k in stop_keys:
+                        if await loop.run_in_executor(None, redis_client.get, k):
+                            stopped = True
+                            break
+                    if stopped:
+                        logger.info(
+                            "audio_worker.dropped_due_to_stop unique_id=%s persona=%s queue=%s",
+                            unique_id,
+                            persona,
+                            queue_name,
+                        )
+                        continue
+            except Exception:
+                pass
+
             if bot_instance.voice_clients and bot_instance.voice_clients[0].channel:
                 channel = bot_instance.voice_clients[0].channel
                 member_count = len(channel.members)
@@ -143,6 +171,38 @@ async def audio_task(queue_name, playback_queue_name, tts_voice, bot_instance):
                 try:
                     if os.path.exists(wav_path):
                         os.remove(wav_path)
+                except Exception:
+                    pass
+
+                # Re-check stop before enqueuing playback (covers in-flight TTS).
+                try:
+                    if bot_instance.voice_clients and bot_instance.voice_clients[0].channel:
+                        vc_channel = bot_instance.voice_clients[0].channel
+                        gid = vc_channel.guild.id
+                        cid = vc_channel.id
+                        persona = "nic" if queue_name == NIC_AUDIO_QUEUE else "derf"
+                        stop_keys = [
+                            f"{VOICE_STOP_KEY_PREFIX}:{gid}:{cid}:all",
+                            f"{VOICE_STOP_KEY_PREFIX}:{gid}:{cid}:{persona}",
+                        ]
+                        stopped = False
+                        for k in stop_keys:
+                            if await loop.run_in_executor(None, redis_client.get, k):
+                                stopped = True
+                                break
+                        if stopped:
+                            logger.info(
+                                "audio_worker.skip_enqueue_due_to_stop unique_id=%s persona=%s opus_path=%s",
+                                unique_id,
+                                persona,
+                                opus_path,
+                            )
+                            try:
+                                if os.path.exists(opus_path):
+                                    os.remove(opus_path)
+                            except Exception:
+                                pass
+                            continue
                 except Exception:
                     pass
 

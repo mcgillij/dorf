@@ -6,6 +6,7 @@ from bot.constants import DERF_PLAYBACK_QUEUE, NIC_PLAYBACK_QUEUE
 from bot.redis_client import redis_client
 from bot.config import VOICE_CHANNEL_ID
 from bot.utilities import connect_to_voice
+from bot.constants import VOICE_STOP_KEY_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,33 @@ async def playback_task(bot_instance, queue_name, voice_channel_id):
                     f"Skipping playback as there are only bots in {channel.name}."
                 )
                 continue  # Skip to the next iteration
+
+            # If someone just said stop/shutup, skip playback.
+            try:
+                gid = guild.id
+                cid = channel.id
+                persona = "nic" if queue_name == NIC_PLAYBACK_QUEUE else "derf"
+                stop_keys = [
+                    f"{VOICE_STOP_KEY_PREFIX}:{gid}:{cid}:all",
+                    f"{VOICE_STOP_KEY_PREFIX}:{gid}:{cid}:{persona}",
+                ]
+                stopped = False
+                for k in stop_keys:
+                    if await asyncio.to_thread(redis_client.get, k):
+                        stopped = True
+                        break
+                if stopped:
+                    logger.info(
+                        "playback_worker.skipped_due_to_stop unique_id=%s persona=%s opus_path=%s",
+                        unique_id,
+                        persona,
+                        opus_path,
+                    )
+                    if os.path.exists(opus_path):
+                        os.remove(opus_path)
+                    continue
+            except Exception:
+                pass
             # state for godot bot
             if bot_instance.statemanager:
                 bot_instance.statemanager.update_state_talking()

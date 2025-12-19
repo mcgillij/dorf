@@ -23,6 +23,10 @@ WHISPER_INFLIGHT_QUEUE = "whisper_inflight_queue"
 WHISPER_DEAD_QUEUE = "whisper_dead_queue"
 VOICE_RESPONSE_QUEUE = "voice_response_queue"
 VOICE_NIC_RESPONSE_QUEUE = "voice_nic_response_queue"
+VOICE_CONTROL_QUEUE = "voice_control_queue"
+
+# When set (with TTL), workers should suppress TTS/playback.
+VOICE_STOP_KEY_PREFIX = "voice_stop"
 
 # TTS Voice Settings
 TTS_ENGINE = "kokoro"  # or use the mimic3 docker container

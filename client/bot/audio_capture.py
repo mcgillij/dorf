@@ -102,6 +102,9 @@ class RingBufferAudioSink(AudioSink):
         try:
             current_time = time.time()
             self.last_packet_time = current_time
+            # Never record bots (prevents bots recording each other / themselves).
+            if member is not None and getattr(member, "bot", False):
+                return
             user_id = member.id if member else None
             if not user_id:
                 return

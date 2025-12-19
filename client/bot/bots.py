@@ -36,6 +36,7 @@ from bot.workers.voice_queue_processor import (
     monitor_derf_response_queue,
     monitor_nic_response_queue,
 )
+from bot.workers.voice_control_worker import monitor_voice_control_queue
 
 from bot.constants import (
     WORKSPACE,
@@ -140,6 +141,7 @@ class NicBot(BaseBot):
             lambda: process_nic_response_queue(self),
             lambda: process_nic_summarizer_queue(self),
             lambda: monitor_nic_response_queue(self),
+            lambda: monitor_voice_control_queue(self),
         ]
         for task in worker_tasks:
             asyncio.create_task(task())
@@ -234,6 +236,7 @@ class DerfBot(BaseBot):
             lambda: process_derf_response_queue(self),
             lambda: process_derf_summarizer_queue(self),
             lambda: monitor_derf_response_queue(self),
+            lambda: monitor_voice_control_queue(self),
         ]
         for task in worker_tasks:
             asyncio.create_task(task())

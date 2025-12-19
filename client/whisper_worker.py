@@ -15,6 +15,7 @@ from bot.constants import (
     WHISPER_DEAD_QUEUE,
     VOICE_RESPONSE_QUEUE,
     VOICE_NIC_RESPONSE_QUEUE,
+    VOICE_CONTROL_QUEUE,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ def _ensure_logging_configured() -> None:
 
 bot_name_pattern = re.compile(r"\b(bot|derf|derfbot|dorf|dwarf)\b", re.IGNORECASE)
 nic_bot_name_pattern = re.compile(r"\b(nic|nick|nicole|nikky|nik)\b", re.IGNORECASE)
+stop_pattern = re.compile(r"\b(stop|shut\s*-?\s*up|shutup)\b", re.IGNORECASE)
 
 # Initialize the database
 db = SQLiteDB()
@@ -264,6 +266,41 @@ class WhisperWorker:
                         len(text_response),
                         preview,
                     )
+
+                    # Voice control: allow users to stop ongoing speech.
+                    # If no bot name is specified, treat as "stop all".
+                    if stop_pattern.search(text_response):
+                        target = "all"
+                        if nic_bot_name_pattern.search(text_response):
+                            target = "nic"
+                        elif bot_name_pattern.search(text_response):
+                            target = "derf"
+
+                        control_payload = {
+                            "action": "stop",
+                            "target": target,
+                            "trace_id": trace_id,
+                            "guild_id": guild_id,
+                            "channel_id": channel_id,
+                            "user_id": user_id,
+                            "message": text_response,
+                        }
+                        redis_client.lpush(VOICE_CONTROL_QUEUE, json.dumps(control_payload))
+                        logger.info(
+                            "whisper.control_enqueued trace_id=%s action=stop target=%s queue=%s",
+                            trace_id,
+                            target,
+                            VOICE_CONTROL_QUEUE,
+                        )
+                        # Clean up audio + inflight; no DB insert or LLM routing.
+                        try:
+                            if os.path.exists(audio_path):
+                                os.remove(audio_path)
+                        except Exception:
+                            pass
+                        await asyncio.to_thread(redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value)
+                        continue
+
                     db.insert_entry(user_id, text_response)
 
                     payload = {

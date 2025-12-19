@@ -8,7 +8,7 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.13.0,<3.14"
-discord-py = "^2.4.0"
+discord-py = "2.6.4"
 redis = "^5.2.1"
 pydub = "^0.25.1"
 pynacl = "^1.5.0"

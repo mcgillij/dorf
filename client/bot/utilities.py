@@ -39,25 +39,75 @@ def patch_voice_recv_opus_decoder() -> None:
     if getattr(vr_opus, "_DERF_PATCHED_OPUS", False):
         return
 
-    try:
-        original_decode_packet = vr_opus.OpusDecoder._decode_packet
-    except Exception:
-        return
+    patched_any = False
 
-    def _decode_packet_safe(self, packet):
+    # Newer discord-ext-voice-recv versions use PacketDecoder.
+    PacketDecoder = getattr(vr_opus, "PacketDecoder", None)
+    if PacketDecoder is not None:
         try:
-            return original_decode_packet(self, packet)
-        except discord.opus.OpusError as e:
-            # Drop the corrupted packet and reset decoder state.
-            logger.warning("voice_recv OpusError (dropping packet): %s", e)
-            try:
-                self._decoder = vr_opus.Decoder()
-            except Exception:
-                pass
-            return packet, b""
+            original_pop_data = PacketDecoder.pop_data
 
-    vr_opus.OpusDecoder._decode_packet = _decode_packet_safe
-    vr_opus._DERF_PATCHED_OPUS = True
+            def pop_data_safe(self, *args, **kwargs):
+                try:
+                    return original_pop_data(self, *args, **kwargs)
+                except discord.opus.OpusError as e:
+                    # Important: do not let this escape, or PacketRouter thread dies.
+                    logger.warning("voice_recv OpusError (dropping packet): %s", e)
+                    try:
+                        self.reset()
+                    except Exception:
+                        pass
+                    return None
+
+            PacketDecoder.pop_data = pop_data_safe
+            patched_any = True
+        except Exception:
+            pass
+
+        # Extra safety: patch _decode_packet too (some versions may call it in other contexts).
+        try:
+            original_decode_packet = PacketDecoder._decode_packet
+
+            def decode_packet_safe(self, packet):
+                try:
+                    return original_decode_packet(self, packet)
+                except discord.opus.OpusError as e:
+                    logger.warning("voice_recv OpusError in _decode_packet (dropping): %s", e)
+                    try:
+                        # Recreate decoder to reset state.
+                        self._decoder = vr_opus.Decoder()
+                    except Exception:
+                        pass
+                    return packet, b""
+
+            PacketDecoder._decode_packet = decode_packet_safe
+            patched_any = True
+        except Exception:
+            pass
+
+    # Backward compatibility: older versions used OpusDecoder.
+    OpusDecoder = getattr(vr_opus, "OpusDecoder", None)
+    if OpusDecoder is not None:
+        try:
+            original_decode_packet = OpusDecoder._decode_packet
+
+            def _decode_packet_safe(self, packet):
+                try:
+                    return original_decode_packet(self, packet)
+                except discord.opus.OpusError as e:
+                    logger.warning("voice_recv OpusError (dropping packet): %s", e)
+                    try:
+                        self._decoder = vr_opus.Decoder()
+                    except Exception:
+                        pass
+                    return packet, b""
+
+            OpusDecoder._decode_packet = _decode_packet_safe
+            patched_any = True
+        except Exception:
+            pass
+
+    vr_opus._DERF_PATCHED_OPUS = bool(patched_any)
 
 
 def get_random_image_path(directory):
