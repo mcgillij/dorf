@@ -19,6 +19,8 @@ NIC_PLAYBACK_QUEUE = "playback_nic_queue"
 
 # Redis queue names as constants
 WHISPER_QUEUE = "whisper_queue"
+WHISPER_INFLIGHT_QUEUE = "whisper_inflight_queue"
+WHISPER_DEAD_QUEUE = "whisper_dead_queue"
 VOICE_RESPONSE_QUEUE = "voice_response_queue"
 VOICE_NIC_RESPONSE_QUEUE = "voice_nic_response_queue"
 

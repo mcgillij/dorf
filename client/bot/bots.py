@@ -1,6 +1,7 @@
 import os
 from random import choice
 import logging
+import time
 
 import asyncio
 import discord
@@ -18,6 +19,7 @@ from bot.utilities import (
     start_capture,
     connect_to_voice,
     voice_capture_watchdog,
+    patch_voice_recv_opus_decoder,
 )
 
 from bot.workers.process_response_worker import (
@@ -93,6 +95,8 @@ class BaseBot(commands.Bot):
     def __init__(self, name, prefix, *args, **kwargs):
         super().__init__(command_prefix=prefix, intents=INTENTS, *args, **kwargs)
         self.name = name
+        # Optional cog; some workers (e.g., playback) check this attribute.
+        self.statemanager = None
         self.add_listener(self.on_ready)
 
     async def on_ready(self):
@@ -128,6 +132,7 @@ class NicBot(BaseBot):
         self.llm = LLMClient(AUTH_TOKEN, NIC_WORKSPACE, NIC_SESSION_ID)
 
     async def on_ready(self):
+        patch_voice_recv_opus_decoder()
         await connect_to_voice(self)
         worker_tasks = [
             lambda: nic_audio_task(self),
@@ -164,6 +169,12 @@ class DerfBot(BaseBot):
                 logger.info(f"{self.name} joined a voice channel, starting capture.")
                 await start_capture(member.guild, after.channel, self)
             elif not after.channel and before.channel:
+                suppress_until = getattr(self, "_suppress_voice_reconnect_until", 0.0) or 0.0
+                if suppress_until and time.time() < suppress_until:
+                    logger.info(
+                        f"{self.name} disconnected as part of intentional reconnect; skipping on_voice_state_update reconnect."
+                    )
+                    return
                 logger.warning(f"{self.name} disconnected. Reconnecting...")
                 await connect_to_voice(self)
             return
@@ -185,13 +196,8 @@ class DerfBot(BaseBot):
 
     async def on_ready(self):
         await super().on_ready()
-        logger.info(f"{self.name} is ready. Checking voice connections...")
-        for guild in self.guilds:
-            voice_channel = discord.utils.get(
-                guild.voice_channels, id=int(os.getenv("VOICE_CHANNEL_ID", 0))
-            )
-            if voice_channel:
-                await start_capture(guild, voice_channel, self)
+        patch_voice_recv_opus_decoder()
+        logger.info(f"{self.name} is ready. Connecting voice + starting capture...")
 
         for extension in EXTENTIONS:
             if extension not in self.extensions:
@@ -204,6 +210,20 @@ class DerfBot(BaseBot):
             logger.info("StateManager successfully loaded.")
 
         await connect_to_voice(self)
+
+        # Start capture once for the configured channel after connection is established.
+        try:
+            guild_id = int(os.getenv("GUILD_ID", "0"))
+            channel_id = int(os.getenv("VOICE_CHANNEL_ID", "0"))
+        except ValueError:
+            guild_id, channel_id = 0, 0
+
+        if guild_id and channel_id:
+            guild = discord.utils.get(self.guilds, id=guild_id)
+            if guild:
+                voice_channel = guild.get_channel(channel_id)
+                if isinstance(voice_channel, discord.VoiceChannel):
+                    await start_capture(guild, voice_channel, self)
 
         # Capture health watchdog (recovers from voice_recv Opus decode failures).
         asyncio.create_task(voice_capture_watchdog(self))

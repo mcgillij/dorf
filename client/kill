@@ -1,1 +1,2 @@
 kill $(ps aux | grep derf | grep -v grep | awk '{print $2}')
+ps aux |grep whisper_worker |awk 'NR>1 {print $2}' |xargs kill

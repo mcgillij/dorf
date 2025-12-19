@@ -20,6 +20,46 @@ timeout = aiohttp.ClientTimeout(total=120)
 logger = logging.getLogger(__name__)
 
 
+def patch_voice_recv_opus_decoder() -> None:
+    """Best-effort runtime patch for discord-ext-voice-recv.
+
+    The upstream library can raise `discord.opus.OpusError: corrupted stream` while decoding.
+    That exception can crash the PacketRouter thread, which then stops delivery of audio and
+    forces reconnect churn.
+
+    This patch makes Opus decode failures drop the offending packet and recreate the decoder
+    instance, allowing capture to continue.
+    """
+
+    try:
+        from discord.ext.voice_recv import opus as vr_opus
+    except Exception:
+        return
+
+    if getattr(vr_opus, "_DERF_PATCHED_OPUS", False):
+        return
+
+    try:
+        original_decode_packet = vr_opus.OpusDecoder._decode_packet
+    except Exception:
+        return
+
+    def _decode_packet_safe(self, packet):
+        try:
+            return original_decode_packet(self, packet)
+        except discord.opus.OpusError as e:
+            # Drop the corrupted packet and reset decoder state.
+            logger.warning("voice_recv OpusError (dropping packet): %s", e)
+            try:
+                self._decoder = vr_opus.Decoder()
+            except Exception:
+                pass
+            return packet, b""
+
+    vr_opus.OpusDecoder._decode_packet = _decode_packet_safe
+    vr_opus._DERF_PATCHED_OPUS = True
+
+
 def get_random_image_path(directory):
     """
     Returns a random image file path from the specified directory.
@@ -204,33 +244,53 @@ def split_text(text):  # This shouldn't be needed anymore since moving mostly to
 async def start_capture(guild, channel, bot, *, force_restart: bool = False):
     logger.info(f"Starting capture in {channel.name} for bot {bot.name}")
     try:
-        vc = guild.voice_client
-        if vc is None or not vc.is_connected():
-            logger.info("Not connected yet. Connecting to voice...")
-            vc = await channel.connect(cls=VoiceRecvClient)
+        # Ensure we don't race multiple start_capture() calls (voice state updates can be noisy).
+        capture_lock = getattr(bot, "_voice_capture_lock", None)
+        if capture_lock is None:
+            capture_lock = asyncio.Lock()
+            bot._voice_capture_lock = capture_lock
 
-        if vc is None or not vc.is_connected():
-            logger.error("Failed to connect to voice, aborting capture.")
-            return
+        async with capture_lock:
+            # Prefer an existing VoiceClient from bot.voice_clients (it can exist while
+            # guild.voice_client is still None during the handshake).
+            vc = next((v for v in bot.voice_clients if v.guild == guild), None) or guild.voice_client
 
-        # Avoid resetting capture on every voice join event. If we are already
-        # listening, keep the existing sink to prevent intermittent dropouts.
-        # But allow a forced restart for health recovery.
-        if vc.is_listening() and not force_restart:
-            logger.debug("Already listening; leaving existing sink running.")
-            return
-        if vc.is_listening() and force_restart:
-            logger.warning("Force restarting capture sink.")
-            try:
-                vc.stop_listening()
-            except Exception:
-                pass
+            if vc is None:
+                logger.info("Not connected yet. Connecting to voice...")
+                vc = await channel.connect(cls=VoiceRecvClient)
 
-        ring_buffer_sink = RingBufferAudioSink(bot=bot, buffer_size=1024 * 1024)
-        # Expose for watchdog/debug
-        bot.voice_capture_sink = ring_buffer_sink
-        vc.listen(ring_buffer_sink)
-        logger.info(f"Recording started in channel {channel.name}")
+            # If a connect is in-flight, wait briefly rather than issuing a second connect.
+            if vc is not None and not vc.is_connected():
+                deadline = time.time() + 10.0
+                while not vc.is_connected() and time.time() < deadline:
+                    await asyncio.sleep(0.25)
+
+            if vc is None or not vc.is_connected():
+                logger.error("Failed to connect to voice, aborting capture.")
+                return
+
+            # Avoid resetting capture on every voice join event. If we are already
+            # listening, keep the existing sink to prevent intermittent dropouts.
+            # But allow a forced restart for health recovery.
+            if vc.is_listening() and not force_restart:
+                logger.debug("Already listening; leaving existing sink running.")
+                return
+            if vc.is_listening() and force_restart:
+                logger.warning("Force restarting capture sink.")
+                try:
+                    vc.stop_listening()
+                except Exception:
+                    pass
+
+            ring_buffer_sink = RingBufferAudioSink(bot=bot, buffer_size=1024 * 1024)
+            # Initialize timestamps so watchdog doesn't treat a fresh sink as "ancient".
+            ring_buffer_sink.last_packet_time = time.time()
+
+            # Expose for watchdog/debug
+            bot.voice_capture_sink = ring_buffer_sink
+            bot.voice_capture_started_at = time.time()
+            vc.listen(ring_buffer_sink)
+            logger.info(f"Recording started in channel {channel.name}")
 
         # Note: the sink receives all members by default; we do not need per-member
         # initialization here.
@@ -264,47 +324,58 @@ async def connect_to_voice(bot, *, force_reconnect: bool = False):
         logger.error(f"Invalid or non-existent voice channel: {voice_channel_id}")
         return
 
-    # Check existing connections in the guild
-    current_vc = next((vc for vc in bot.voice_clients if vc.guild == guild), None)
+    # Ensure we don't run overlapping connect attempts (watchdog + voice events + playback worker).
+    connect_lock = getattr(bot, "_voice_connect_lock", None)
+    if connect_lock is None:
+        connect_lock = asyncio.Lock()
+        bot._voice_connect_lock = connect_lock
 
-    try:
-        if force_reconnect and current_vc:
-            logger.warning("Force reconnect requested; disconnecting voice client.")
-            try:
-                await current_vc.disconnect(force=True)
-            except Exception:
-                pass
-            current_vc = None
+    async with connect_lock:
+        # Check existing connections in the guild
+        current_vc = next((vc for vc in bot.voice_clients if vc.guild == guild), None)
 
-        if not current_vc:
-            await voice_channel.connect(cls=VoiceRecvClient)
-            logger.info(f"Connected to {voice_channel.name}")
-        else:
-            # Enforce VoiceRecvClient so receive/capture continues to work even
-            # after reconnects initiated elsewhere.
-            if not isinstance(current_vc, VoiceRecvClient):
-                logger.warning(
-                    "Existing voice client is not VoiceRecvClient; reconnecting with VoiceRecvClient."
-                )
-                await current_vc.disconnect(force=True)
-                await voice_channel.connect(cls=VoiceRecvClient)
-                logger.info(f"Reconnected to {voice_channel.name}")
-                return
+        try:
+            if force_reconnect and current_vc:
+                # Suppress duplicate reconnect triggers from on_voice_state_update while we intentionally
+                # churn the connection for recovery.
+                bot._suppress_voice_reconnect_until = time.time() + 10.0
 
-            # Check if already connected to the correct channel
-            if current_vc.channel.id != voice_channel.id:
-                # Move existing client or reconnect?
+                logger.warning("Force reconnect requested; disconnecting voice client.")
                 try:
-                    await current_vc.move_to(voice_channel)  # Attempt move first
-                    logger.info(f"Moved to {voice_channel.name}")
-                except discord.errors.InvalidData as e:
-                    logger.error(f"Move failed: {e}. Reconnecting...")
-                    await current_vc.disconnect()
-                    await voice_channel.connect(cls=VoiceRecvClient)
+                    await current_vc.disconnect(force=True)
+                except Exception:
+                    pass
+                current_vc = None
+
+            if not current_vc:
+                await voice_channel.connect(cls=VoiceRecvClient)
+                logger.info(f"Connected to {voice_channel.name}")
             else:
-                logger.debug("Already connected to the correct channel.")
-    except Exception as e:
-        logger.exception(f"Connection error: {str(e)}")
+                # Enforce VoiceRecvClient so receive/capture continues to work even
+                # after reconnects initiated elsewhere.
+                if not isinstance(current_vc, VoiceRecvClient):
+                    logger.warning(
+                        "Existing voice client is not VoiceRecvClient; reconnecting with VoiceRecvClient."
+                    )
+                    await current_vc.disconnect(force=True)
+                    await voice_channel.connect(cls=VoiceRecvClient)
+                    logger.info(f"Reconnected to {voice_channel.name}")
+                    return
+
+                # Check if already connected to the correct channel
+                if current_vc.channel and current_vc.channel.id != voice_channel.id:
+                    # Move existing client or reconnect?
+                    try:
+                        await current_vc.move_to(voice_channel)  # Attempt move first
+                        logger.info(f"Moved to {voice_channel.name}")
+                    except discord.errors.InvalidData as e:
+                        logger.error(f"Move failed: {e}. Reconnecting...")
+                        await current_vc.disconnect()
+                        await voice_channel.connect(cls=VoiceRecvClient)
+                else:
+                    logger.debug("Already connected to the correct channel.")
+        except Exception as e:
+            logger.exception(f"Connection error: {str(e)}")
 
 
 async def voice_capture_watchdog(
@@ -357,20 +428,34 @@ async def voice_capture_watchdog(
             if not sink:
                 continue
 
-            last_packet_time = getattr(sink, "last_packet_time", 0.0) or 0.0
-            age = time.time() - last_packet_time if last_packet_time else 999999
+            # Use internal voice_recv thread health rather than "time since audio packet".
+            # Discord does not send RTP when nobody is speaking; using RTP timestamps causes
+            # constant reconnect loops during normal silence.
+            reader = getattr(vc, "_reader", None)
+            if reader is None:
+                continue
+
+            dead_parts: list[str] = []
+            for name in ("packet_router", "event_router", "keepalive"):
+                part = getattr(reader, name, None)
+                if part is not None and hasattr(part, "is_alive") and not part.is_alive():
+                    dead_parts.append(name)
+
+            reader_error = getattr(reader, "error", None)
+            if reader_error is not None:
+                dead_parts.append("reader_error")
 
             logger.debug(
-                "voice_capture_watchdog: listening=%s humans=%s last_packet_age_s=%s",
+                "voice_capture_watchdog: listening=%s humans=%s dead_parts=%s",
                 True,
                 has_humans,
-                int(age),
+                dead_parts,
             )
 
-            if age > stale_seconds:
+            if dead_parts:
                 logger.warning(
-                    "voice_capture_watchdog: stale capture detected (age_s=%s). Reconnecting + restarting capture.",
-                    int(age),
+                    "voice_capture_watchdog: capture pipeline unhealthy (dead_parts=%s). Reconnecting + restarting capture.",
+                    dead_parts,
                 )
                 await connect_to_voice(bot, force_reconnect=True)
                 await start_capture(guild, channel, bot, force_restart=True)

@@ -14,6 +14,7 @@ from pydub import AudioSegment
 import discord
 from discord.ext.voice_recv import AudioSink, VoiceData
 from bot.redis_client import redis_client
+from bot.constants import WHISPER_QUEUE
 
 logger = logging.getLogger(__name__)
 
@@ -196,10 +197,31 @@ class RingBufferAudioSink(AudioSink):
                     "trace_id": str(uuid.uuid4()),
                 }
                 payload.update(self.user_context.get(user_id, {}))
-                redis_client.lpush(
-                    "whisper_queue",
-                    json.dumps(payload),
+                payload_json = json.dumps(payload)
+                try:
+                    new_len = redis_client.lpush(WHISPER_QUEUE, payload_json)
+                except Exception as e:
+                    logger.error(
+                        "whisper.enqueue_failed user_id=%s path=%s error=%s",
+                        user_id,
+                        converted_path,
+                        e,
+                    )
+                    ring_buffer.clear()
+                    return
+
+                logger.info(
+                    "whisper.enqueue_ok user_id=%s trace_id=%s guild_id=%s channel_id=%s queue=%s new_len=%s payload_bytes=%s path=%s",
+                    user_id,
+                    payload.get("trace_id"),
+                    payload.get("guild_id"),
+                    payload.get("channel_id"),
+                    WHISPER_QUEUE,
+                    new_len,
+                    len(payload_json.encode("utf-8")),
+                    converted_path,
                 )
+
                 logger.info(f"Saved audio to {converted_path}")
             else:
                 logger.error("No PCM data to save")
