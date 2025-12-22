@@ -17,7 +17,7 @@ async def playback_task(bot_instance, queue_name, voice_channel_id):
     """
     while True:
         try:
-            playback_data = redis_client.rpop(queue_name)
+            playback_data = await asyncio.to_thread(redis_client.rpop, queue_name)
             if not playback_data:
                 await asyncio.sleep(1)
                 continue

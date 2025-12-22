@@ -195,7 +195,12 @@ def generate_unique_id(ctx, message: str) -> str:
 
 
 async def poll_redis_for_key(key: str, timeout: float = 0.5) -> str:
-    """Polls Redis for a key and returns its value when found."""
+    """Polls Redis for a key and returns its value when found.
+
+    Note: this is intentionally unbounded (used by legacy flows). For bounded waits,
+    use `poll_redis_for_key_with_timeout`.
+    """
+
     while True:
         response = await asyncio.to_thread(redis_client.get, key)
         # Redis returns None when missing; empty strings are valid values and must
@@ -204,6 +209,33 @@ async def poll_redis_for_key(key: str, timeout: float = 0.5) -> str:
             await asyncio.to_thread(redis_client.delete, key)
             return response.decode("utf-8") if isinstance(response, bytes) else response
         await asyncio.sleep(timeout)
+
+
+async def poll_redis_for_key_with_timeout(
+    key: str,
+    *,
+    poll_interval_s: float = 0.5,
+    max_wait_s: float = 15.0,
+    delete: bool = True,
+) -> str | None:
+    """Poll Redis for `key` for up to `max_wait_s` seconds.
+
+    Returns:
+        - The decoded value (including empty string) if the key is found.
+        - None if the deadline elapses.
+    """
+
+    deadline = time.monotonic() + max_wait_s
+    while True:
+        response = await asyncio.to_thread(redis_client.get, key)
+        if response is not None:
+            if delete:
+                await asyncio.to_thread(redis_client.delete, key)
+            return response.decode("utf-8") if isinstance(response, bytes) else response
+
+        if time.monotonic() >= deadline:
+            return None
+        await asyncio.sleep(poll_interval_s)
 
 
 def split_message(message: str, max_length: int = 2000) -> list[str]:
@@ -245,11 +277,11 @@ class LLMClient:
                         )
                         return ""
             except asyncio.TimeoutError:
-                logger.error("Request timed out.")
-                return "The summarizer request timed out. Please try again later."
+                logger.error("Summarizer request timed out.")
+                return ""
             except Exception as e:
-                logger.error(f"Exception during API call: {e}")
-                return "An error occurred while processing the summarizer request. Please try again later."
+                logger.error(f"Exception during summarizer API call: {e}")
+                return ""
 
     async def get_response(self, message: str) -> str:
         url = f"http://{LLM_HOST}/api/v1/workspace/{self.workspace}/chat"

@@ -131,10 +131,10 @@ class WhisperWorker:
         _ensure_logging_configured()
         # Connect to Redis
         logger.info("Connecting to Redis")
-        if not redis_client.ping():
+        if not await asyncio.to_thread(redis_client.ping):
             raise ConnectionError("Failed to connect to Redis.")
         try:
-            qlen = redis_client.llen(WHISPER_QUEUE)
+            qlen = await asyncio.to_thread(redis_client.llen, WHISPER_QUEUE)
         except Exception:
             qlen = "?"
         logger.info(
@@ -285,7 +285,7 @@ class WhisperWorker:
                             "user_id": user_id,
                             "message": text_response,
                         }
-                        redis_client.lpush(VOICE_CONTROL_QUEUE, json.dumps(control_payload))
+                        await asyncio.to_thread(redis_client.lpush, VOICE_CONTROL_QUEUE, json.dumps(control_payload))
                         logger.info(
                             "whisper.control_enqueued trace_id=%s action=stop target=%s queue=%s",
                             trace_id,
@@ -317,13 +317,13 @@ class WhisperWorker:
                     payload["user_id"] = user_id
 
                     if bot_name_pattern.search(text_response):
-                        redis_client.lpush(VOICE_RESPONSE_QUEUE, json.dumps(payload))
+                        await asyncio.to_thread(redis_client.lpush, VOICE_RESPONSE_QUEUE, json.dumps(payload))
                         logger.info("whisper.routed trace_id=%s queue=%s", trace_id, VOICE_RESPONSE_QUEUE)
                         if os.path.exists(audio_path):
                             os.remove(audio_path)
                         await asyncio.to_thread(redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value)
                     elif nic_bot_name_pattern.search(text_response):
-                        redis_client.lpush(VOICE_NIC_RESPONSE_QUEUE, json.dumps(payload))
+                        await asyncio.to_thread(redis_client.lpush, VOICE_NIC_RESPONSE_QUEUE, json.dumps(payload))
                         logger.info("whisper.routed trace_id=%s queue=%s", trace_id, VOICE_NIC_RESPONSE_QUEUE)
                         if os.path.exists(audio_path):
                             os.remove(audio_path)

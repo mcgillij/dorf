@@ -31,6 +31,15 @@ async def process_queue(queue_name, response_key_prefix, bot):
             # Call the bot's get_summarizer_response
             response = await bot.llm.get_summarizer_response(message)
 
+            response = (response or "").strip()
+            if not response:
+                logger.error(
+                    "summarizer.empty queue=%s unique_id=%s message_len=%s",
+                    queue_name,
+                    unique_id,
+                    len(message or ""),
+                )
+
             # Store the response in Redis for retrieval
             await asyncio.to_thread(
                 redis_client.set, f"{response_key_prefix}:{unique_id}", response

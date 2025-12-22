@@ -7,9 +7,12 @@ from typing import Awaitable, Callable, Optional
 
 from bot.constants import LONG_RESPONSE_THRESHOLD, SUMMARIZER_RESPONSE_KEY
 from bot.redis_client import redis_client
-from bot.utilities import split_message, poll_redis_for_key
+from bot.utilities import split_message, poll_redis_for_key_with_timeout
 
 logger = logging.getLogger(__name__)
+
+
+SUMMARIZER_MAX_WAIT_S = 15.0
 
 
 SendCallable = Callable[[str], Awaitable[None]]
@@ -64,8 +67,34 @@ async def summarize_if_needed(
     )
 
     summary_key = f"{SUMMARIZER_RESPONSE_KEY}:{unique_id}"
-    summary = await poll_redis_for_key(summary_key)
-    return summary or ""
+    summary = await poll_redis_for_key_with_timeout(
+        summary_key,
+        max_wait_s=SUMMARIZER_MAX_WAIT_S,
+        poll_interval_s=0.5,
+        delete=True,
+    )
+
+    if summary is None:
+        logger.error(
+            "summarize.timeout trace_id=%s unique_id=%s waited_s=%s summary_key=%s",
+            ctx.trace_id,
+            unique_id,
+            SUMMARIZER_MAX_WAIT_S,
+            summary_key,
+        )
+        return response_text
+
+    summary = (summary or "").strip()
+    if not summary:
+        logger.error(
+            "summarize.empty trace_id=%s unique_id=%s summary_key=%s",
+            ctx.trace_id,
+            unique_id,
+            summary_key,
+        )
+        return response_text
+
+    return summary
 
 
 async def enqueue_tts(
