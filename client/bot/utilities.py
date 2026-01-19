@@ -211,9 +211,24 @@ async def preprocess_mentions(ctx, message: str) -> tuple[str, dict]:
 async def postprocess_mentions(ctx, response: str, mention_map: dict) -> str:
     """
     Replace placeholders in LLM response with original mentions.
+    Also handle any @IDs that match the mapped users.
     """
+    # First, replace placeholders
     for placeholder, mention in mention_map.items():
         response = response.replace(placeholder, mention)
+    
+    # Then, replace any @IDs that are in the map
+    import re
+    def replace_id(match):
+        user_id = match.group(1)
+        mention = f"<@{user_id}>"
+        # Check if this ID is in our map (as value)
+        for m in mention_map.values():
+            if m == mention:
+                return mention
+        return match.group(0)  # Leave as is if not in map
+    
+    response = re.sub(r'@(\d+)', replace_id, response)
     return response
 
 
