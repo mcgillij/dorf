@@ -183,6 +183,40 @@ async def replace_userids_with_username(ctx, text: str) -> str:
     return text
 
 
+async def preprocess_mentions(ctx, message: str) -> tuple[str, dict]:
+    """
+    Replace Discord mentions with placeholders and return the mapping.
+    Returns: (processed_message, mention_map)
+    """
+    import re
+    mention_map = {}
+    placeholder_counter = 1
+
+    def replace_mention(match):
+        nonlocal placeholder_counter
+        user_id = match.group(1)
+        placeholder = f"{{{{user{placeholder_counter}}}}}"  # e.g., {{user1}}
+        
+        # Store original mention
+        mention_map[placeholder] = f"<@{user_id}>"
+        
+        placeholder_counter += 1
+        return placeholder
+
+    # Regex for user mentions (supports <@user_id> and <@!user_id>)
+    processed_message = re.sub(r'<@!?(\d+)>', replace_mention, message)
+    return processed_message, mention_map
+
+
+async def postprocess_mentions(ctx, response: str, mention_map: dict) -> str:
+    """
+    Replace placeholders in LLM response with original mentions.
+    """
+    for placeholder, mention in mention_map.items():
+        response = response.replace(placeholder, mention)
+    return response
+
+
 def filter_message(message: str) -> bool:
     return any(keyword.lower() in message.lower() for keyword in FILTERED_KEYWORDS)
 

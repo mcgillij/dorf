@@ -8,6 +8,8 @@ from bot.utilities import (
     generate_unique_id,
     poll_redis_for_key,
     replace_userids_with_username,
+    preprocess_mentions,
+    postprocess_mentions,
 )
 from bot.redis_client import redis_client
 from bot.pipelines.unified import RequestContext, deliver_existing_response
@@ -36,8 +38,11 @@ async def queue_message_processing(ctx, message: str, queue_name: str):
     logger.info(f"{queue_name.capitalize()}: Unique ID: {unique_id}")
     # Store the context if not already stored
     context_dict.setdefault(unique_id, ctx)
-    # Queue the message for processing
-    # message = await replace_userids_with_username(ctx, message)
+    # Preprocess mentions
+    message, mention_map = await preprocess_mentions(ctx, message)
+    # Store mention map in Redis
+    mention_map_key = f"mention_map:{unique_id}"
+    await asyncio.to_thread(redis_client.set, mention_map_key, json.dumps(mention_map), ex=3600)  # 1 hour TTL
     logger.info(f"Here's the username: {ctx.author.name}")
     await asyncio.to_thread(
         redis_client.lpush,
@@ -68,7 +73,12 @@ async def process_response(
     key = f"{response_key_prefix}:{unique_id}"
     response = await poll_redis_for_key(key)
     logger.debug(f"{response_key_prefix.capitalize()}: Response: {response}")
-    # response = await replace_userids_with_username(ctx, response)
+    # Postprocess mentions
+    mention_map_key = f"mention_map:{unique_id}"
+    mention_map_raw = await asyncio.to_thread(redis_client.get, mention_map_key)
+    if mention_map_raw:
+        mention_map = json.loads(mention_map_raw)
+        response = await postprocess_mentions(ctx, response, mention_map)
     logger.debug(
         f"{response_key_prefix.capitalize()}: Response after replacing userids: {response}"
     )
