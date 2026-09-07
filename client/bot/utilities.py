@@ -483,6 +483,17 @@ def split_text(text):  # This shouldn't be needed anymore since moving mostly to
 
 
 async def start_capture(guild, channel, bot, *, force_restart: bool = False):
+    # Only the capture persona listens. Both bots sit in the same channel; if
+    # both attached sinks, every utterance would be transcribed and answered
+    # twice (double echo + double response).
+    capture_persona = os.getenv("CAPTURE_PERSONA", "derf").strip().lower()
+    if getattr(bot, "persona", "derf") != capture_persona:
+        logger.info(
+            "Skipping capture for %s (capture persona is %s).",
+            bot.name,
+            capture_persona,
+        )
+        return
     logger.info(f"Starting capture in {channel.name} for bot {bot.name}")
     try:
         # Ensure we don't race multiple start_capture() calls (voice state updates can be noisy).

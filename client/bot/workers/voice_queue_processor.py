@@ -1,6 +1,7 @@
 import json
 import asyncio
 import logging
+import os
 import uuid
 from bot.redis_client import redis_client
 
@@ -19,6 +20,14 @@ from bot.constants import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Repeating what was asked back to the chat channel is a debug aid; off by
+# default so normal replies appear only once.
+ECHO_PROMPT_TO_CHAT = os.getenv("ECHO_PROMPT_TO_CHAT", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 # Requeue failed items this many times before dead-lettering them.
 MAX_PIPELINE_ATTEMPTS = 3
@@ -139,7 +148,7 @@ async def process_response_queue(
                             "nic" if queue_name == VOICE_NIC_RESPONSE_QUEUE else "derf"
                         ),
                     ),
-                    echo_prompt_to_chat=True,
+                    echo_prompt_to_chat=ECHO_PROMPT_TO_CHAT,
                 )
             except Exception as e:
                 # LLMRequestError and other pipeline failures requeue the item
