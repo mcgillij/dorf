@@ -40,9 +40,13 @@ async def process_queue(queue_name, response_key_prefix, bot):
                     len(message or ""),
                 )
 
-            # Store the response in Redis for retrieval
+            # Store the response in Redis for retrieval. TTL guards against
+            # leaks when the waiter gave up (15s poll) before deleting the key.
             await asyncio.to_thread(
-                redis_client.set, f"{response_key_prefix}:{unique_id}", response
+                redis_client.set,
+                f"{response_key_prefix}:{unique_id}",
+                response,
+                ex=3600,
             )
         except Exception as e:
             logger.exception(f"Error processing {queue_name}: {e}")

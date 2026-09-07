@@ -109,7 +109,7 @@ class MiscCog(commands.Cog):
                 f":game_die: {ctx.author.mention} rolled `{clean_notation}`: {result_message}"
             )
 
-        except (dice.DiceBaseException, dice.DiceFatalError) as e:
+        except dice.DiceBaseException as e:
             logger.warning(
                 f"Invalid dice notation from {ctx.author}: '{clean_notation}'. Error: {e}"
             )

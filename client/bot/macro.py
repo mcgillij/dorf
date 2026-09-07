@@ -82,7 +82,14 @@ class MacroCog(commands.Cog):
         if not message.content.startswith("!"):
             return
 
-        command_name = message.content[1:].split()[0].lower()
+        parts = message.content[1:].split()
+        if not parts:
+            return
+        command_name = parts[0].lower()
+
+        # Real commands take precedence over macros (prevents double responses)
+        if self.bot.get_command(command_name) is not None:
+            return
 
         cur = self.db.execute(
             "SELECT response FROM macros WHERE guild_id = ? AND name = ?",

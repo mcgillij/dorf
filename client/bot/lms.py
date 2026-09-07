@@ -5,11 +5,27 @@ import logging
 
 from bot.tools.searxng_search import search_internet
 
-# from bot.constants import MAX_PREDICTION_ROUNDS
+from bot.constants import MAX_PREDICTION_ROUNDS
 from bot.chroma import RAGContextBuilder, collection
 
 rag_builder = RAGContextBuilder(collection, search_internet, similarity_threshold=0.5)
 logger = logging.getLogger(__name__)
+
+_LLM_CALL_TIMEOUT_S = 120
+_ACT_CALL_TIMEOUT_S = 300
+
+_model = None
+_model_lock = asyncio.Lock()
+
+
+async def get_model():
+    """Load the LM Studio model handle once, off the event loop, and reuse it."""
+    global _model
+    if _model is None:
+        async with _model_lock:
+            if _model is None:
+                _model = await asyncio.to_thread(lms.llm)
+    return _model
 
 
 async def wrap_model_to_indian_translate(
@@ -23,12 +39,15 @@ async def wrap_model_to_indian_translate(
     )
     chat.add_user_message(query)
     try:
-        result = await loop.run_in_executor(
-            None,
-            lambda: model.respond(
-                chat,
-                on_message=chat.append,
+        result = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: model.respond(
+                    chat,
+                    on_message=chat.append,
+                ),
             ),
+            timeout=_LLM_CALL_TIMEOUT_S,
         )
         return result  # assuming this is text
     except Exception as e:
@@ -50,12 +69,15 @@ async def wrap_model_qa_insult(model) -> str:
     )
     # chat.add_user_message(query)
     try:
-        result = await loop.run_in_executor(
-            None,
-            lambda: model.respond(
-                chat,
-                on_message=chat.append,
+        result = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: model.respond(
+                    chat,
+                    on_message=chat.append,
+                ),
             ),
+            timeout=_LLM_CALL_TIMEOUT_S,
         )
         return result  # assuming this is text
     except Exception as e:
@@ -79,12 +101,15 @@ async def wrap_model_from_indian_translate(
     )
     chat.add_user_message(query)
     try:
-        result = await loop.run_in_executor(
-            None,
-            lambda: model.respond(
-                chat,
-                on_message=chat.append,
+        result = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: model.respond(
+                    chat,
+                    on_message=chat.append,
+                ),
             ),
+            timeout=_LLM_CALL_TIMEOUT_S,
         )
         return result  # assuming this is text
     except Exception as e:
@@ -106,12 +131,15 @@ async def wrap_model(model, query, on_message=None, callback=None) -> str:
     )
     chat.add_user_message(query)
     try:
-        result = await loop.run_in_executor(
-            None,
-            lambda: model.respond(
-                chat,
-                on_message=chat.append,
+        result = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: model.respond(
+                    chat,
+                    on_message=chat.append,
+                ),
             ),
+            timeout=_LLM_CALL_TIMEOUT_S,
         )
         return result  # assuming this is text
     except Exception as e:
@@ -136,17 +164,17 @@ async def wrap_model_act(model, query, tools, on_message=None, callback=None) ->
         search_results.append(param)
 
     try:
-        await loop.run_in_executor(
-            None,
-            lambda: model.act(
-                query,
-                tools,
-                on_message=append_search,
-                # max_prediction_rounds=MAX_PREDICTION_ROUNDS,
-                # on_round_start=callback,
-                # on_round_end=callback,
-                # on_prediction_completed=callback,
+        await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: model.act(
+                    query,
+                    tools,
+                    on_message=append_search,
+                    max_prediction_rounds=MAX_PREDICTION_ROUNDS,
+                ),
             ),
+            timeout=_ACT_CALL_TIMEOUT_S,
         )
         logger.info(f"********************** {search_results=}")
         parsed_result = parse_all_texts(search_results)
@@ -166,7 +194,7 @@ async def wrap_model_act(model, query, tools, on_message=None, callback=None) ->
 
 async def qa_insult() -> str:
     """QA Insult"""
-    model = lms.llm()  # load model
+    model = await get_model()
     logger.info("model loaded")
 
     response = await wrap_model_qa_insult(
@@ -181,10 +209,10 @@ async def qa_insult() -> str:
 
 async def translate_to_indian(query: str, callback=None) -> str:
     """translate"""
-    model = lms.llm()  # load model
+    model = await get_model()
     logger.info("model loaded")
 
-    response = await wrap_model(
+    response = await wrap_model_to_indian_translate(
         model,
         query,
         # callback=callback,
@@ -197,10 +225,10 @@ async def translate_to_indian(query: str, callback=None) -> str:
 
 async def translate_to_english(query: str, callback=None) -> str:
     """translate"""
-    model = lms.llm()  # load model
+    model = await get_model()
     logger.info("model loaded")
 
-    response = await wrap_model(
+    response = await wrap_model_from_indian_translate(
         model,
         query,
         # callback=callback,
@@ -213,7 +241,7 @@ async def translate_to_english(query: str, callback=None) -> str:
 
 async def summarize(query: str, callback) -> str:
     """summarize"""
-    model = lms.llm()  # load model
+    model = await get_model()
     logger.info("model loaded")
 
     response = await wrap_model(
@@ -237,7 +265,7 @@ async def search_with_tool(query: str, callback) -> str:
 
     logger.info(f"Searching using RAG flow for: {query}")
 
-    model = lms.llm()  # load model
+    model = await get_model()
     logger.info("model loaded")
 
     # Use RAG builder

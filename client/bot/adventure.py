@@ -50,7 +50,15 @@ class Adventure(commands.Cog):
             return
 
         self.active_quests[ctx.author.id] = {"wins": 0, "losses": 0}
+        try:
+            await self._run_adventure(ctx, leveling_cog, user_stats)
+        finally:
+            # Always release the per-user lock — an LLM failure/timeout must
+            # not leave the user stuck ("already on an adventure") until
+            # restart.
+            self.active_quests.pop(ctx.author.id, None)
 
+    async def _run_adventure(self, ctx, leveling_cog, user_stats):
         chat = Chat(
             f"You are a retired adventuring bard guiding the user:'{user_stats}' on a heroic quest. "
             "The user will always respond with: Run away, Stealth, or Fight. "
@@ -80,7 +88,6 @@ class Adventure(commands.Cog):
                 )
             except asyncio.TimeoutError:
                 await ctx.send("You hesitated too long... the opportunity vanished.")
-                del self.active_quests[ctx.author.id]
                 return
 
             # Map emoji to action
@@ -145,14 +152,24 @@ class Adventure(commands.Cog):
                 await ctx.send(end_text)
                 await ctx.send(final_story)
 
-                # Award XP
+                # Award XP (add_xp returns the amount actually granted —
+                # the chat cooldown can silently swallow the reward)
+                granted = 0
                 if leveling_cog:
-                    await leveling_cog.add_xp(ctx.author.id, xp_earned)
+                    granted = (
+                        await leveling_cog.add_xp(
+                            ctx.author.id, xp_earned, guild=ctx.guild
+                        )
+                        or 0
+                    )
 
-                await ctx.send(f"You gained **{xp_earned} XP** from your journey!")
+                if granted > 0:
+                    await ctx.send(f"You gained **{granted} XP** from your journey!")
+                else:
+                    await ctx.send(
+                        "Your recent chatter dulled the reward — no XP this time!"
+                    )
 
-                # Clean up
-                del self.active_quests[ctx.author.id]
                 return  # End command here!
 
             # 🚀 Adventure still ongoing, continue

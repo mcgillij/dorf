@@ -175,6 +175,7 @@ class Leveling(commands.Cog):
                 return f"**{user}** the level {level} ({bold_prestige_title} {title} {flair})"
 
     async def add_xp(self, user_id, amount, guild=None, channel=None):
+        """Grant XP. Returns the amount actually granted (0 if cooled down)."""
         with sqlite3.connect(XP_DB) as conn:
             c = conn.cursor()
 
@@ -189,10 +190,10 @@ class Leveling(commands.Cog):
             if row:
                 xp, level, last_ts, prestige = row
                 if last_ts and (now_ts - last_ts) < XP_COOLDOWN_SECONDS:
-                    return
-                # prestige bonus
+                    return 0
+                # prestige bonus (round-half-up so small grants keep their bonus)
                 bonus_mult = 1 + (prestige * 0.10)
-                amount = int(amount * bonus_mult)
+                amount = int(amount * bonus_mult + 0.5)
 
                 xp += amount
                 old_level = level
@@ -252,6 +253,8 @@ class Leveling(commands.Cog):
                 )
 
                 conn.commit()
+
+            return amount
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -448,6 +451,11 @@ class Leveling(commands.Cog):
             timeout=30.0,
             return_when=asyncio.FIRST_COMPLETED,
         )
+        # Cancel the losing/timeout waiters — they hold event-listener tasks
+        # (and a registered wait_for) until an unrelated matching event
+        # arrives, possibly hours later.
+        for t in pending:
+            t.cancel()
 
         if not done:
             await ctx.send("❌ Prestige cancelled (timeout).")

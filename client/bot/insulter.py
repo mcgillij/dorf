@@ -44,15 +44,27 @@ class Insulter(commands.Cog):
 
     async def cog_unload(self):
         self.check_tasks.cancel()  # Stop the periodic task when the cog is unloaded
+        for task in list(self.running_tasks.values()):
+            task.cancel()
+        self.running_tasks.clear()
 
     async def start_task(self, task_id: int, task_name: str, interval: int):
         """Start a task and update its status in the database."""
         logger.info("In start_task")
+        interval = max(5, interval)
+        sleep_s = interval * 60
 
         async def task_runner():
             while True:
-                await self.execute_task_logic(task_id, task_name)
-                await asyncio.sleep(interval * 60)  # Wait for the next interval
+                try:
+                    await self.execute_task_logic(task_id, task_name)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception(
+                        "Task run failed (id=%s, name=%s)", task_id, task_name
+                    )
+                await asyncio.sleep(sleep_s)  # Wait for the next interval
 
         # Start the task and store it in the running_tasks dictionary
         task = asyncio.create_task(task_runner())
@@ -84,6 +96,8 @@ class Insulter(commands.Cog):
             logger.debug(f"All tasks after reset: {all_tasks}")
         except Exception as e:
             logger.error(f"Error resetting tasks to pending: {e}")
+
+    async def stop_task(self, task_id: int):
         """Stop a running task and update its status in the database."""
         logger.info("In stop task")
         if task_id in self.running_tasks:
@@ -102,7 +116,7 @@ class Insulter(commands.Cog):
         qa_result = await qa_insult()
         channel = self.bot.get_channel(CHAT_CHANNEL_ID)
         if channel:
-            await channel.send(f"<@1004346899156979753>: {qa_result}")
+            await channel.send(f"<@{user_id}>: {qa_result}")
         self.update_task(task_id, last_run=datetime.datetime.now(), status="running")
 
     def get_user_id(self, task_id: int, task_name: str) -> Optional[int]:
@@ -131,6 +145,18 @@ class Insulter(commands.Cog):
         scheduled_tasks = cursor.fetchall()
 
         for task_id, task_name, interval, status in scheduled_tasks:
+            # Reap dead runners so the watchdog can restart them
+            runner = self.running_tasks.get(task_id)
+            if runner and runner.done():
+                del self.running_tasks[task_id]
+                if not runner.cancelled() and runner.exception():
+                    logger.error(
+                        "Task runner died (id=%s, name=%s): %r",
+                        task_id,
+                        task_name,
+                        runner.exception(),
+                    )
+                self.update_task(task_id, status="pending")
             if status != "running" and task_id not in self.running_tasks:
                 try:
                     logger.info(f"Starting task: {task_name} (ID: {task_id})")

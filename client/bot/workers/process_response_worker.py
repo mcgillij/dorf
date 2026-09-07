@@ -40,9 +40,13 @@ async def process_response_queue(queue_name, response_key_prefix, bot):
                 logger.error(f"{queue_name}: LLM request failed: {e}")
                 response = ""
 
-            # Store the response in Redis for retrieval
+            # Store the response in Redis for retrieval. TTL guards against
+            # leaks when the poller timed out or died before deleting the key.
             await asyncio.to_thread(
-                redis_client.set, f"{response_key_prefix}:{unique_id}", response
+                redis_client.set,
+                f"{response_key_prefix}:{unique_id}",
+                response,
+                ex=3600,
             )
         except Exception as e:
             logger.exception(f"{queue_name}: Error processing response queue: {e}")

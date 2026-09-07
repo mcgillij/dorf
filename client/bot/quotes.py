@@ -75,7 +75,7 @@ class QuoteCog(commands.Cog):
         else:
             # Search quotes by keyword
             c.execute(
-                "SELECT id, author, quote_text FROM quotes WHERE quote_text LIKE ?",
+                "SELECT id, author, quote_text, source FROM quotes WHERE quote_text LIKE ?",
                 (f"%{arg}%",),
             )
 

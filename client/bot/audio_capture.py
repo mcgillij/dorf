@@ -124,8 +124,40 @@ class RingBufferAudioSink(AudioSink):
         self.user_context: Dict[int, Dict[str, int]] = {}
         self.processing_locks: Dict[int, asyncio.Lock] = {}
         self.save_task = None
+        # Guards every shared dict below: write() runs on the voice-recv
+        # packet thread while check_for_silence()/forget_user() run on the
+        # event loop — unsynchronized mutation killed the flusher with
+        # "dictionary changed size during iteration".
+        self._state_lock = threading.Lock()
+        # Room-echo suppression: while the bot's TTS is playing, drop captured
+        # packets (open mics pick up our own speaker) plus a short tail.
+        self._echo_until = 0.0
         os.makedirs(self.output_dir, exist_ok=True)
         logger.info("RingBufferAudioSink initialized")
+
+    _ECHO_TAIL_S = 0.5
+
+    def _bot_is_playing(self, member) -> bool:
+        """True while this bot is playing audio (plus a small echo tail)."""
+        try:
+            guild = getattr(member, "guild", None)
+            vc = None
+            for v in self.bot.voice_clients:
+                if getattr(v, "channel", None) and (
+                    guild is None or v.channel.guild.id == guild.id
+                ):
+                    vc = v
+                    break
+            if vc is None:
+                return False
+            now = time.monotonic()
+            if vc.is_playing():
+                self._echo_until = max(self._echo_until, now + self._ECHO_TAIL_S)
+                return True
+            return now < self._echo_until
+        except Exception:
+            logger.debug("capture.playback_state_check_failed", exc_info=True)
+            return False
 
     def write(self, member, data: VoiceData):
         try:
@@ -138,27 +170,35 @@ class RingBufferAudioSink(AudioSink):
             if not user_id:
                 return
 
+            # Suppress room echo of our own TTS — otherwise the bot can
+            # transcribe its own voice (via a user's open mic) and answer
+            # itself.
+            if self._bot_is_playing(member):
+                return
+
             # Capture context for downstream routing/observability
             try:
                 if member and member.guild and member.voice and member.voice.channel:
-                    self.user_context[user_id] = {
-                        "guild_id": member.guild.id,
-                        "channel_id": member.voice.channel.id,
-                    }
+                    with self._state_lock:
+                        self.user_context[user_id] = {
+                            "guild_id": member.guild.id,
+                            "channel_id": member.voice.channel.id,
+                        }
             except Exception:
                 # Best-effort only
                 pass
 
-            if user_id not in self.processing_locks:
-                self.processing_locks[user_id] = asyncio.Lock()
+            with self._state_lock:
+                if user_id not in self.processing_locks:
+                    self.processing_locks[user_id] = asyncio.Lock()
 
-            if user_id not in self.ring_buffers:
-                logger.info(f"Creating new buffer for user {user_id}")
-                self.ring_buffers[user_id] = RingBuffer(self.buffer_size)
-                self.chunk_start_time[user_id] = current_time
+                if user_id not in self.ring_buffers:
+                    logger.info(f"Creating new buffer for user {user_id}")
+                    self.ring_buffers[user_id] = RingBuffer(self.buffer_size)
+                    self.chunk_start_time[user_id] = current_time
 
-            self.ring_buffers[user_id].write(data.pcm)
-            self.last_audio_time[user_id] = current_time
+                self.ring_buffers[user_id].write(data.pcm)
+                self.last_audio_time[user_id] = current_time
 
             # Use the bot's loop
             if not self.save_task or self.save_task.done():
@@ -167,14 +207,18 @@ class RingBufferAudioSink(AudioSink):
                 )
 
         except Exception as e:
-            logger.error(f"Error in write method: {e}")
+            logger.exception(f"Error in write method: {e}")
 
     async def check_for_silence(self):
         """Background task to check for silence periods and save audio"""
         try:
             while True:
                 current_time = time.monotonic()
-                for user_id, last_time in list(self.last_audio_time.items()):
+                # Snapshot under the state lock: the packet thread mutates
+                # this dict concurrently.
+                with self._state_lock:
+                    items = list(self.last_audio_time.items())
+                for user_id, last_time in items:
                     silence_elapsed = current_time - last_time
                     chunk_elapsed = current_time - self.chunk_start_time.get(
                         user_id, last_time
@@ -201,9 +245,13 @@ class RingBufferAudioSink(AudioSink):
                         # we were saving; otherwise their new packets are still
                         # pending in a fresh buffer and must be flushed later.
                         # (pop: the user may have left voice and been forgotten
-                        # while the save was running.)
-                        if self.last_audio_time.get(user_id) == last_time:
-                            self.last_audio_time.pop(user_id, None)
+                        # while the save was running.) Check-and-pop must be
+                        # atomic: the packet thread refreshes the timestamp
+                        # between get() and pop() would otherwise delete the
+                        # fresh value.
+                        with self._state_lock:
+                            if self.last_audio_time.get(user_id) == last_time:
+                                self.last_audio_time.pop(user_id, None)
 
                 # If no active audio streams, end the task
                 if not self.last_audio_time:
@@ -211,7 +259,7 @@ class RingBufferAudioSink(AudioSink):
 
                 await asyncio.sleep(0.1)  # Small delay to prevent CPU overuse
         except Exception as e:
-            logger.error(f"Error in check_for_silence: {e}")
+            logger.exception(f"Error in check_for_silence: {e}")
 
     def forget_user(self, user_id) -> None:
         """Drop all per-user state when a member leaves the voice channel.
@@ -219,11 +267,12 @@ class RingBufferAudioSink(AudioSink):
         Without this, every departed user leaks a full-size ring buffer and a
         lock for the lifetime of the sink.
         """
-        self.ring_buffers.pop(user_id, None)
-        self.processing_locks.pop(user_id, None)
-        self.user_context.pop(user_id, None)
-        self.last_audio_time.pop(user_id, None)
-        self.chunk_start_time.pop(user_id, None)
+        with self._state_lock:
+            self.ring_buffers.pop(user_id, None)
+            self.processing_locks.pop(user_id, None)
+            self.user_context.pop(user_id, None)
+            self.last_audio_time.pop(user_id, None)
+            self.chunk_start_time.pop(user_id, None)
         logger.info(f"Forgot capture state for user {user_id}")
 
     def save_user_audio(self, user_id):

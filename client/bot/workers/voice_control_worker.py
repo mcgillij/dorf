@@ -42,7 +42,9 @@ async def _set_stop_flags(
         try:
             await asyncio.to_thread(redis_client.set, key, "1", ex=ttl_s)
         except Exception:
-            pass
+            logger.warning(
+                "voice_control.set_stop_flag_failed key=%s", key, exc_info=True
+            )
 
 
 async def _clear_queues(target: str) -> None:
@@ -57,7 +59,7 @@ async def _clear_queues(target: str) -> None:
         try:
             await asyncio.to_thread(redis_client.delete, q)
         except Exception:
-            pass
+            logger.warning("voice_control.clear_queue_failed queue=%s", q, exc_info=True)
 
 
 async def _stop_voice_client(
@@ -87,15 +89,23 @@ async def _stop_voice_client(
     if voice_client and voice_client.is_connected():
         try:
             if voice_client.is_playing():
-                voice_client.stop()
+                # stop_playing() only halts audio. voice_client.stop() on a
+                # VoiceRecvClient also tears down listening, which deafens
+                # capture until the watchdog revives it.
+                stop_fn = getattr(voice_client, "stop_playing", voice_client.stop)
+                stop_fn()
         except Exception:
-            pass
+            logger.warning("voice_control.stop_client_failed", exc_info=True)
 
 
-async def monitor_voice_control_queue(bot_instance, *, stop_ttl_s: int = 10) -> None:
+async def monitor_voice_control_queue(bot_instance, *, stop_ttl_s: int = 120) -> None:
     """Consumes this bot's voice control queue and applies stop/shutup actions.
 
     This runs per-bot process, so it can directly stop the local voice client.
+
+    The TTL must comfortably exceed worst-case TTS generation + queue latency,
+    otherwise an item already synthesizing when "stop" was said outlives the
+    flag and plays anyway (P1-12b).
     """
 
     persona = getattr(bot_instance, "persona", None) or "derf"
@@ -148,17 +158,18 @@ async def monitor_voice_control_queue(bot_instance, *, stop_ttl_s: int = 10) -> 
                 resolved_channel_id,
             )
 
-            # Stop any current playback immediately.
-            await _stop_voice_client(
-                bot_instance, guild_id=resolved_guild_id, channel_id=resolved_channel_id
-            )
-
-            # Suppress new playback briefly and clear pending queues.
+            # Suppress new playback FIRST (flags must exist before any worker
+            # could observe the stop), then halt current audio, then clear
+            # pending queues. Order matters: stopping playback before setting
+            # flags let in-flight items start playing after the stop (P1-12a).
             await _set_stop_flags(
                 guild_id=resolved_guild_id,
                 channel_id=resolved_channel_id,
                 target=target,
                 ttl_s=stop_ttl_s,
+            )
+            await _stop_voice_client(
+                bot_instance, guild_id=resolved_guild_id, channel_id=resolved_channel_id
             )
             await _clear_queues(target)
 

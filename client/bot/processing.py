@@ -101,9 +101,11 @@ async def process_response(
     logger.debug(
         f"{response_key_prefix.capitalize()}: Response after replacing userids: {response}"
     )
-    # Check for voice channel users
+    # Check for voice channel users (ctx.guild is None in DMs)
     human_in_voice_channel = bool(
-        ctx.guild.voice_client
+        ctx.guild
+        and ctx.guild.voice_client
+        and ctx.guild.voice_client.channel
         and any(not member.bot for member in ctx.guild.voice_client.channel.members)
     )
     logger.info(

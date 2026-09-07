@@ -1,2 +1,9 @@
-#!
-./kill && ./startup && tail -f *.log
+#!/usr/bin/env bash
+# Restart the bot + STT worker: stop cleanly, wait, then start.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+./kill
+# Give the Discord gateway a moment to release the token/voice connections.
+sleep 2
+./startup

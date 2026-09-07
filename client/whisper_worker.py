@@ -32,6 +32,33 @@ end
 return 0
 """
 
+# Singleton lock: only one worker may consume whisper_queue. A second
+# worker's reaper would steal in-flight jobs from the live one and produce
+# duplicate transcripts/responses (double speech).
+_WORKER_LOCK_KEY = "whisper_worker_lock"
+_WORKER_LOCK_TTL_S = 30
+
+# Refresh the lock TTL only if we still own it (never steal someone else's).
+_LOCK_REFRESH_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+"""
+
+
+def _remove_audio(audio_path: str | None) -> None:
+    """Best-effort deletion of a transcribed wav (never raises)."""
+    if not audio_path:
+        return
+    try:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+    except OSError:
+        logger.warning(
+            "whisper.audio_cleanup_failed path=%s", audio_path, exc_info=True
+        )
+
 
 def _ensure_logging_configured() -> None:
     """Ensure INFO logs are visible when whisper_worker is run standalone.
@@ -111,9 +138,6 @@ class WhisperClient:
             return ""
         except Exception as e:
             logger.exception("whisper.exception trace_id=%s error=%s", trace_id, e)
-            import traceback
-
-            traceback.print_exc()
             return ""
 
 
@@ -144,6 +168,37 @@ class WhisperWorker:
         # How long a follow-up stays with the bot that answered the last
         # wake-word turn, without needing the wake word again.
         self._session_ttl_s = int(os.getenv("VOICE_SESSION_TTL_S", "60"))
+        # A job stuck in inflight longer than this is considered stranded
+        # (requeued by the idle reaper). Must exceed the whisper HTTP timeout.
+        self._lease_s = int(os.getenv("WHISPER_LEASE_S", "120"))
+        self._lock_token = f"{os.getpid()}-{int(time.time())}"
+
+    async def _acquire_singleton_lock(self) -> None:
+        acquired = await asyncio.to_thread(
+            redis_client.set,
+            _WORKER_LOCK_KEY,
+            self._lock_token,
+            nx=True,
+            ex=_WORKER_LOCK_TTL_S,
+        )
+        if not acquired:
+            raise SystemExit(
+                "Another whisper worker holds whisper_worker_lock; exiting to "
+                "avoid duplicate transcription (see docs/improvement.md P1-10)."
+            )
+        logger.info("whisper.singleton_lock_acquired token=%s", self._lock_token)
+
+    async def _refresh_singleton_lock(self) -> bool:
+        """Refresh the lock TTL if we still own it. False = we lost it."""
+        renewed = await asyncio.to_thread(
+            redis_client.eval,
+            _LOCK_REFRESH_LUA,
+            1,
+            _WORKER_LOCK_KEY,
+            self._lock_token,
+            _WORKER_LOCK_TTL_S * 1000,
+        )
+        return bool(renewed)
 
     async def _requeue_stranded_inflight(self) -> int:
         """Move jobs stranded in the inflight list back to the main queue.
@@ -170,6 +225,7 @@ class WhisperWorker:
         logger.info("Connecting to Redis")
         if not await asyncio.to_thread(redis_client.ping):
             raise ConnectionError("Failed to connect to Redis.")
+        await self._acquire_singleton_lock()
         await self._requeue_stranded_inflight()
         try:
             qlen = await asyncio.to_thread(redis_client.llen, WHISPER_QUEUE)
@@ -189,7 +245,10 @@ class WhisperWorker:
             whisper_client = WhisperClient(session, url=self._whisper_url)
             last_job_time = 0.0
             last_idle_log = 0.0
+            last_lock_refresh = 0.0
+            last_reap = 0.0
             while True:
+                raw_value = None
                 try:
                     # Use an inflight list so jobs are not silently lost if the worker
                     # crashes or Whisper errors out.
@@ -202,6 +261,46 @@ class WhisperWorker:
 
                     if not raw_value:
                         now = time.time()
+                        # Keep the singleton lock alive while idle.
+                        if now - last_lock_refresh >= 10.0:
+                            if not await self._refresh_singleton_lock():
+                                logger.error(
+                                    "whisper.singleton_lock_lost — another worker "
+                                    "took over; exiting."
+                                )
+                                return
+                            last_lock_refresh = now
+                        # Idle reaper: we hold no job (we're in the idle branch)
+                        # and the singleton lock guarantees no other live worker,
+                        # so anything sitting in inflight is stranded. Requeue it.
+                        if (
+                            last_job_time
+                            and now - last_job_time > self._lease_s
+                            and now - last_reap > self._lease_s
+                        ):
+                            try:
+                                inflight_len = await asyncio.to_thread(
+                                    redis_client.llen, WHISPER_INFLIGHT_QUEUE
+                                )
+                            except Exception:
+                                inflight_len = 0
+                            if inflight_len:
+                                last_reap = now
+                                moved = 0
+                                while True:
+                                    raw = await asyncio.to_thread(
+                                        redis_client.rpoplpush,
+                                        WHISPER_INFLIGHT_QUEUE,
+                                        WHISPER_QUEUE,
+                                    )
+                                    if not raw:
+                                        break
+                                    moved += 1
+                                if moved:
+                                    logger.warning(
+                                        "whisper.inflight_reaped_idle moved=%s",
+                                        moved,
+                                    )
                         # Heartbeat: show queue length periodically when idle.
                         if now - last_idle_log >= 30.0:
                             try:
@@ -236,6 +335,14 @@ class WhisperWorker:
                     )
 
                     last_job_time = time.time()
+                    # Refresh the singleton lock before processing: a long
+                    # whisper call must not outlive the 30s lock TTL.
+                    if not await self._refresh_singleton_lock():
+                        logger.error(
+                            "whisper.singleton_lock_lost — another worker took "
+                            "over; exiting."
+                        )
+                        return
 
                     try:
                         path_info = json.loads(raw_value)
@@ -398,6 +505,29 @@ class WhisperWorker:
                     # Voice control: stop/shut-up only counts when addressed to a bot,
                     # so ordinary speech containing "stop" can't kill the pipeline.
                     if stop_pattern.search(text_response):
+                        # Duplicate suppression: a requeued copy of this job
+                        # must not fire a second stop.
+                        if trace_id:
+                            claimed = await asyncio.to_thread(
+                                redis_client.set,
+                                f"voice_done:{trace_id}",
+                                "1",
+                                nx=True,
+                                ex=3600,
+                            )
+                            if not claimed:
+                                logger.warning(
+                                    "whisper.duplicate_suppressed trace_id=%s (stop path)",
+                                    trace_id,
+                                )
+                                await asyncio.to_thread(
+                                    redis_client.lrem,
+                                    WHISPER_INFLIGHT_QUEUE,
+                                    1,
+                                    raw_value,
+                                )
+                                _remove_audio(audio_path)
+                                continue
                         control_payload = {
                             "action": "stop",
                             "target": routed,
@@ -424,54 +554,149 @@ class WhisperWorker:
                             control_queue,
                         )
                         # Clean up audio + inflight; no DB insert or LLM routing.
-                        try:
-                            if os.path.exists(audio_path):
-                                os.remove(audio_path)
-                        except Exception:
-                            pass
+                        _remove_audio(audio_path)
                         await asyncio.to_thread(
                             redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value
                         )
                         continue
 
-                    await asyncio.to_thread(db.insert_entry, user_id, text_response)
-
-                    payload = {
-                        # uuid4: randint IDs collide (1-in-900k), and a collision
-                        # cross-wires TTS temp paths and summarizer keys.
-                        "unique_id": uuid.uuid4().hex,
-                        "message": text_response,
-                    }
-                    # Carry metadata forward for multi-guild routing later.
+                    # --- Idempotency claim (normal path) ---
+                    # Requeues (crash recovery, idle reaper) must never produce
+                    # a second transcript/response for the same trace_id — this
+                    # was a concrete double-speech root cause.
                     if trace_id:
-                        payload["trace_id"] = trace_id
-                    if guild_id:
-                        payload["guild_id"] = guild_id
-                    if channel_id:
-                        payload["channel_id"] = channel_id
-                    payload["user_id"] = user_id
+                        claimed = await asyncio.to_thread(
+                            redis_client.set,
+                            f"voice_done:{trace_id}",
+                            "1",
+                            nx=True,
+                            ex=3600,
+                        )
+                        if not claimed:
+                            logger.warning(
+                                "whisper.duplicate_suppressed trace_id=%s", trace_id
+                            )
+                            await asyncio.to_thread(
+                                redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value
+                            )
+                            _remove_audio(audio_path)
+                            continue
 
-                    response_queue = (
-                        VOICE_RESPONSE_QUEUE
-                        if routed == "derf"
-                        else VOICE_NIC_RESPONSE_QUEUE
-                    )
-                    await asyncio.to_thread(
-                        redis_client.lpush, response_queue, json.dumps(payload)
-                    )
-                    logger.info(
-                        "whisper.routed trace_id=%s queue=%s", trace_id, response_queue
-                    )
-                    if os.path.exists(audio_path):
-                        os.remove(audio_path)
+                    # --- Ack BEFORE side effects ---
+                    # Once acked, a crash can lose the job (rare, at-most-once)
+                    # but must not duplicate it on the next startup requeue.
                     await asyncio.to_thread(
                         redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value
                     )
+                    try:
+                        await asyncio.to_thread(db.insert_entry, user_id, text_response)
+
+                        payload = {
+                            # uuid4: randint IDs collide (1-in-900k), and a collision
+                            # cross-wires TTS temp paths and summarizer keys.
+                            "unique_id": uuid.uuid4().hex,
+                            "message": text_response,
+                        }
+                        # Carry metadata forward for multi-guild routing later.
+                        if trace_id:
+                            payload["trace_id"] = trace_id
+                        if guild_id:
+                            payload["guild_id"] = guild_id
+                        if channel_id:
+                            payload["channel_id"] = channel_id
+                        payload["user_id"] = user_id
+
+                        response_queue = (
+                            VOICE_RESPONSE_QUEUE
+                            if routed == "derf"
+                            else VOICE_NIC_RESPONSE_QUEUE
+                        )
+                        await asyncio.to_thread(
+                            redis_client.lpush, response_queue, json.dumps(payload)
+                        )
+                        logger.info(
+                            "whisper.routed trace_id=%s queue=%s",
+                            trace_id,
+                            response_queue,
+                        )
+                    except Exception:
+                        # Side effects may be partially done; release the claim
+                        # and requeue (job already acked, so plain LPUSH) so the
+                        # next attempt retries cleanly. The fresh claim next
+                        # attempt is what keeps this at-least-once without dupes.
+                        logger.exception(
+                            "whisper.dispatch_failed trace_id=%s", trace_id
+                        )
+                        if trace_id:
+                            await asyncio.to_thread(
+                                redis_client.delete, f"voice_done:{trace_id}"
+                            )
+                        if attempt < self._max_attempts:
+                            path_info["attempt"] = attempt + 1
+                            path_info["last_error"] = "dispatch_failed"
+                            await asyncio.to_thread(
+                                redis_client.lpush, WHISPER_QUEUE, json.dumps(path_info)
+                            )
+                        else:
+                            path_info["attempt"] = attempt
+                            path_info["dead_reason"] = "dispatch_failed"
+                            await asyncio.to_thread(
+                                redis_client.lpush,
+                                WHISPER_DEAD_QUEUE,
+                                json.dumps(path_info),
+                            )
+                        continue
+                    _remove_audio(audio_path)
 
                 except Exception as e:
-                    # Important: if we crashed mid-processing, keep the job in inflight.
-                    # The watchdog/ops can decide to requeue inflight later.
+                    # Requeue-or-dead-letter the job we were holding so it
+                    # doesn't strand in inflight until restart (the old
+                    # behaviour silently dropped the user's utterance). The
+                    # idempotency claim token, if set, suppresses duplicates.
                     logger.exception("whisper.loop_exception error=%s", e)
+                    if raw_value is not None:
+                        try:
+                            path_info = json.loads(raw_value)
+                            attempt = int(path_info.get("attempt", 1) or 1)
+                            if attempt < self._max_attempts:
+                                path_info["attempt"] = attempt + 1
+                                path_info["last_error"] = f"loop_exception: {e}"
+                                moved = await asyncio.to_thread(
+                                    redis_client.eval,
+                                    _RETRY_MOVE_LUA,
+                                    2,
+                                    WHISPER_INFLIGHT_QUEUE,
+                                    WHISPER_QUEUE,
+                                    raw_value,
+                                    json.dumps(path_info),
+                                )
+                                if not moved:
+                                    # Job wasn't in inflight (e.g. already
+                                    # acked); plain requeue.
+                                    await asyncio.to_thread(
+                                        redis_client.lpush,
+                                        WHISPER_QUEUE,
+                                        json.dumps(path_info),
+                                    )
+                            else:
+                                path_info["attempt"] = attempt
+                                path_info["dead_reason"] = "loop_exception"
+                                await asyncio.to_thread(
+                                    redis_client.lpush,
+                                    WHISPER_DEAD_QUEUE,
+                                    json.dumps(path_info),
+                                )
+                                await asyncio.to_thread(
+                                    redis_client.lrem,
+                                    WHISPER_INFLIGHT_QUEUE,
+                                    1,
+                                    raw_value,
+                                )
+                        except Exception:
+                            logger.exception(
+                                "whisper.requeue_after_error_failed — job may be "
+                                "stranded until the idle reaper runs"
+                            )
                     await asyncio.sleep(0.25)
 
 

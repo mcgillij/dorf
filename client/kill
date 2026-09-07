@@ -1,6 +1,35 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Stop the bot and STT worker. Empty PID lists are expected when nothing runs.
-pids=$(ps aux | grep -E "derfbot\.py" | grep -v grep | awk '{print $2}')
-if [ -n "$pids" ]; then kill $pids; fi
-pids=$(ps aux | grep -E "whisper_worker\.py" | grep -v grep | awk '{print $2}')
-if [ -n "$pids" ]; then kill $pids; fi
+# Tight patterns anchored to "python ... <script>" so editors/viewers of the
+# file (vi derfbot.py, less, etc.) are never matched.
+set -uo pipefail
+
+stop_procs() {
+  local pattern="$1"
+  local pids
+  pids=$(pgrep -f "$pattern" 2>/dev/null || true)
+  if [ -z "$pids" ]; then
+    return 0
+  fi
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null || true
+  # Wait up to 10s for a clean exit, then escalate.
+  for _ in $(seq 1 20); do
+    pids=$(pgrep -f "$pattern" 2>/dev/null || true)
+    [ -z "$pids" ] && break
+    sleep 0.5
+  done
+  pids=$(pgrep -f "$pattern" 2>/dev/null || true)
+  if [ -n "$pids" ]; then
+    echo "escalating to SIGKILL for: $pids"
+    # shellcheck disable=SC2086
+    kill -9 $pids 2>/dev/null || true
+  fi
+}
+
+stop_procs "[p]ython.*derfbot\.py"
+stop_procs "[p]ython.*whisper_worker\.py"
+
+# Orphaned log followers from startup (docker compose/docker logs -f).
+pkill -f "[c]ompose logs -f.*redis" 2>/dev/null || true
+pkill -f "[d]ocker logs -f.*derf-whisper" 2>/dev/null || true
