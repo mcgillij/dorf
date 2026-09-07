@@ -7,8 +7,8 @@ __pycache__/
 *.db
 spack
 frieren
-*.json
 # runtime data read by bot/sdcog.py — must ship with a fresh clone
+*.json
 !waifu_prompts.json
 !war_waifus.json
 !checkpoints.json
