@@ -234,15 +234,28 @@ class Insulter(commands.Cog):
                 (user_id, username),
             )
 
-        self.add_task(user_id, task_name, interval)
+        self.add_task(user_id, task_name, max(5, interval))
         await ctx.send(
-            f"Task '{task_name}' added with an interval of {interval} minutes."
+            f"Task '{task_name}' added with an interval of {max(5, interval)} minutes."
         )
 
     @commands.command(name="qa_remove_task")
     async def remove_task_command(self, ctx, task_id: int):
         """Remove task id. format: <id>:int"""
         """Remove a scheduled task by its ID."""
+        cursor = self.db.cursor()
+        cursor.execute(
+            "SELECT user_id FROM scheduled_tasks WHERE id = ?", (task_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            await ctx.send(f"No task with ID {task_id}.")
+            return
+        is_owner = row[0] == ctx.author.id
+        is_mod = bool(ctx.guild and ctx.author.guild_permissions.manage_guild)
+        if not (is_owner or is_mod):
+            await ctx.send("You can only remove your own tasks.")
+            return
         self.remove_task(task_id)
         await ctx.send(f"Task with ID {task_id} has been removed.")
 

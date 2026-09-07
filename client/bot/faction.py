@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 import random
 import logging
@@ -8,6 +9,7 @@ from discord.ext import commands, tasks
 from bot.constants import FACTION_DB, DEFAULT_FACTIONS
 from bot.config import CHAT_CHANNEL_ID
 from bot.emoji import extract_emojis
+from bot.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +106,7 @@ class FactionCog(commands.Cog):
 
     async def cog_unload(self):
         self.check_war_warnings.cancel()
+        self.check_war_end.cancel()
 
     @tasks.loop(minutes=5)
     async def check_war_warnings(self):
@@ -197,6 +200,22 @@ class FactionCog(commands.Cog):
         emoji = str(reaction.emoji)
         user_id = user.id
         if not emoji:
+            return
+
+        # Dedup per reaction identity: Discord re-fires this listener on every
+        # remove-and-re-add of the same reaction, so without this a user can
+        # loop one reaction and farm war score infinitely (docs/improvement.md P2-28).
+        dedup_key = f"faction_rxn:{reaction.message.id}:{user_id}:{emoji}"
+        first_time = await asyncio.to_thread(
+            redis_client.set, dedup_key, "1", nx=True, ex=600
+        )
+        if not first_time:
+            logger.debug(
+                "Skipping duplicate reaction: msg=%s user=%s emoji=%s",
+                reaction.message.id,
+                user_id,
+                emoji,
+            )
             return
 
         faction_id = self.get_user_faction(user_id)
@@ -487,6 +506,7 @@ class FactionCog(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="startwar")
+    @commands.has_permissions(manage_guild=True)
     async def startwar(self, ctx):
         """Start a emoji war if one isn't already on-going"""
         with sqlite3.connect(FACTION_DB) as conn:
@@ -504,7 +524,13 @@ class FactionCog(commands.Cog):
                     return
 
             now = datetime.now(timezone.utc).isoformat()
-            c.execute("UPDATE war_state SET started_at = ? WHERE id = 1", (now,))
+            # Reset warning flags too — otherwise the next war gets no
+            # 24h/12h/1h countdown warnings (they stayed set from the last one).
+            c.execute(
+                "UPDATE war_state SET started_at = ?, warning_24h_sent = 0, "
+                "warning_12h_sent = 0, warning_1h_sent = 0 WHERE id = 1",
+                (now,),
+            )
             c.execute("DELETE FROM faction_scores")
             conn.commit()
 
@@ -577,13 +603,40 @@ class FactionCog(commands.Cog):
     async def reset_factions(self):
         with sqlite3.connect(FACTION_DB) as conn:
             c = conn.cursor()
-            # Clear faction scores
-            c.execute("DELETE FROM faction_scores")
-            # Clear factions
-            c.execute("DELETE FROM factions")
-            conn.commit()
+            try:
+                # Transactional reset: dropping factions without reseeding left
+                # assign_faction/factioninfo/war_history broken until restart,
+                # and user_factions rows dangling (docs/improvement.md P0-8).
+                c.execute("DELETE FROM faction_scores")
+                c.execute("DELETE FROM user_factions")
+                c.execute("DELETE FROM factions")
+                for faction in DEFAULT_FACTIONS:
+                    c.execute(
+                        "INSERT INTO factions (name, symbol, color) VALUES (?, ?, ?)",
+                        (faction["name"], faction["symbol"], faction["color"]),
+                    )
+                c.execute(
+                    "UPDATE war_state SET warning_24h_sent = 0, "
+                    "warning_12h_sent = 0, warning_1h_sent = 0 WHERE id = 1"
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
         return "All factions and scores have been reset. Ready for the next war!"
+
+    # Error handlers keep the loops alive: without them a single transient
+    # sqlite error stops war-end/warning detection until restart.
+    @check_war_end.error
+    async def check_war_end_error(self, error):
+        logger.exception("faction.check_war_end failed (loop continues)", exc_info=error)
+
+    @check_war_warnings.error
+    async def check_war_warnings_error(self, error):
+        logger.exception(
+            "faction.check_war_warnings failed (loop continues)", exc_info=error
+        )
 
     @commands.command(name="war_history")
     async def show_war_history(self, ctx):

@@ -105,6 +105,9 @@ class EmojiUsageCog(commands.Cog):
 
     @commands.command(name="emojileaderboard", aliases=["el"])
     async def emoji_leaderboard(self, ctx, top_n: int = 10):
+        # Bound the work: top_n is user-provided and drives the SQL LIMIT
+        # plus per-row user lookups.
+        top_n = min(top_n, 25)
         with sqlite3.connect(EMOJI_DB) as conn:
             c = conn.cursor()
             c.execute(
@@ -128,11 +131,19 @@ class EmojiUsageCog(commands.Cog):
         for user_id, emoji_used, count in rows:
             user_emoji_stats[user_id].append((emoji_used, count))
 
-        # Fetch usernames
+        # Fetch usernames: prefer the guild member cache and only hit the
+        # API on a miss; deleted users raise NotFound and must not crash.
         leaderboard_entries = []
         for user_id, emoji_stats in user_emoji_stats.items():
-            user = await ctx.bot.fetch_user(user_id)
-            username = user.display_name if user else f"User {user_id}"
+            member = ctx.guild.get_member(user_id) if ctx.guild else None
+            if member is not None:
+                username = member.display_name
+            else:
+                try:
+                    user = await ctx.bot.fetch_user(user_id)
+                    username = user.display_name
+                except (discord.NotFound, discord.HTTPException):
+                    username = "Unknown user"
 
             total_user_usage = sum(count for _, count in emoji_stats)
             top_emojis = sorted(emoji_stats, key=lambda x: -x[1])[:3]

@@ -1,6 +1,8 @@
 from typing import Dict, List
 import re
 import logging
+import asyncio
+from pathlib import Path
 
 from bot.constants import RELEVANT_THRESHOLD
 
@@ -9,10 +11,13 @@ from chromadb.config import Settings
 
 logger = logging.getLogger(__name__)
 
+# Anchor to the repo root: a different CWD used to silently create an
+# empty vector store.
+_CHROMA_PATH = str(Path(__file__).resolve().parent.parent / "chromadb.db")
 
 # Setup Chroma Client
 chroma_client = chromadb.PersistentClient(
-    path="./chromadb.db", settings=Settings(anonymized_telemetry=False)
+    path=_CHROMA_PATH, settings=Settings(anonymized_telemetry=False)
 )
 
 # Create (or get) a collection
@@ -65,7 +70,9 @@ class RAGContextBuilder:
         """Main entrypoint: retrieve relevant documents from ChromaDB and live search."""
         logger.info(f"Retrieving context for query: {query}")
 
-        chroma_results = self.search_chroma(query, callback=callback)
+        chroma_results = await asyncio.to_thread(
+            self.search_chroma, query, callback=callback
+        )
         live_search_results = await self.search_fn(query, callback=callback)
 
         combined = chroma_results + live_search_results

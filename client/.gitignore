@@ -10,3 +10,5 @@ prompts/
 docs/
 models/
 logs/
+*.db-wal
+*.db-shm

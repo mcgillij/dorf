@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 message_queue = asyncio.Queue()
 
+# The bot's running loop, captured at setup, so executor-thread producers
+# can enqueue via call_soon_threadsafe instead of a cross-thread put_nowait.
+_BOT_LOOP = None
+
 
 # Background task to process the queue
 async def message_dispatcher(bot):
@@ -27,7 +31,13 @@ async def message_dispatcher(bot):
 
 
 def enqueue_message(channel, content):
-    message_queue.put_nowait((channel, content))
+    item = (channel, content)
+    if _BOT_LOOP is not None:
+        # Producers may run on an executor thread's private event loop, where
+        # put_nowait on the bot's queue is unsafe; marshal to the bot loop.
+        _BOT_LOOP.call_soon_threadsafe(message_queue.put_nowait, item)
+    else:
+        message_queue.put_nowait(item)
 
 
 class SearchCog(commands.Cog):
@@ -50,6 +60,11 @@ class SearchCog(commands.Cog):
 
 
 async def setup(bot):
-    await bot.add_cog(SearchCog(bot))
-    asyncio.create_task(message_dispatcher(bot))
+    global _BOT_LOOP
+    _BOT_LOOP = asyncio.get_running_loop()
+
+    cog = SearchCog(bot)
+    await bot.add_cog(cog)
+    # Keep a reference so the dispatcher task isn't garbage-collected.
+    cog.dispatcher_task = asyncio.create_task(message_dispatcher(bot))
     logger.info("Search Cog loaded successfully.")

@@ -46,15 +46,27 @@ class MacroCog(commands.Cog):
         if ctx.guild is None:
             await ctx.send("This command can only be used in a server.")
             return
+        cur = self.db.execute(
+            "SELECT created_by FROM macros WHERE guild_id = ? AND name = ?",
+            (ctx.guild.id, name.lower()),
+        )
+        row = cur.fetchone()
+        if not row:
+            await ctx.send("No such macro found.")
+            return
+        is_creator = row[0] == str(ctx.author)
+        is_mod = ctx.author.guild_permissions.manage_messages
+        if not (is_creator or is_mod):
+            await ctx.send(
+                "You can only delete macros you created (or have Manage Messages)."
+            )
+            return
         with self.db:
             cur = self.db.execute(
                 "DELETE FROM macros WHERE guild_id = ? AND name = ?",
                 (ctx.guild.id, name.lower()),
             )
-        if cur.rowcount:
-            await ctx.send(f"Macro `{name}` deleted.")
-        else:
-            await ctx.send("No such macro found.")
+        await ctx.send(f"Macro `{name}` deleted.")
 
     @commands.command()
     async def listmacros(self, ctx):

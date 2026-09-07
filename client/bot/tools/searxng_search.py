@@ -13,6 +13,19 @@ logger = logging.getLogger(__name__)
 
 SEARCH_URL = "https://searx.mcgillij.dev"
 
+# Bounded so a hung searxng can't stall the RAG path for aiohttp's
+# default 300s.
+_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=15)
+
+
+def _parse_results(data_text: str):
+    try:
+        data = json.loads(data_text)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("searxng returned non-JSON body (%s chars)", len(data_text or ""))
+        return []
+    return data.get("results", []) or []
+
 
 async def search_internet(q: str, callback=None) -> List[Dict]:
     """search the internet for the top results of a query, to be used when llm is unfamiliar with a topic"""
@@ -20,21 +33,24 @@ async def search_internet(q: str, callback=None) -> List[Dict]:
     url = SEARCH_URL
     params = {"q": q, "format": "json"}
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
         async with session.get(url, params=params, ssl=True) as response:
             if response.status == 200:
                 data = await response.text()
-                data = json.loads(data)
+                search_results = _parse_results(data)
                 results = []
                 source_num = 0
 
-                for result in data.get("results", []):
+                for result in search_results:
                     title = result.get("title")
                     url = result.get("url")
                     score = result.get("score")
                     content = result.get("content")
 
-                    if score > RELEVANT_THRESHOLD:
+                    if (
+                        isinstance(score, (int, float))
+                        and score > RELEVANT_THRESHOLD
+                    ):
                         downloaded = await asyncio.to_thread(trafilatura.fetch_url, url)
                         extracted_content = await asyncio.to_thread(
                             trafilatura.extract, downloaded
@@ -63,13 +79,21 @@ async def search_internet(q: str, callback=None) -> List[Dict]:
                             }
                         )
 
-                        # Store full content in ChromaDB
+                        # Store full content in ChromaDB (upsert: re-searching
+                        # a stored URL must not raise DuplicateIDError and
+                        # abort the whole search flow).
                         if extracted_content:
-                            collection.add(
-                                documents=[extracted_content],
-                                metadatas=[{"source_url": url, "title": title}],
-                                ids=[url],  # Using URL as a unique ID
-                            )
+                            try:
+                                collection.upsert(
+                                    documents=[extracted_content],
+                                    metadatas=[{"source_url": url, "title": title}],
+                                    ids=[url],  # Using URL as a unique ID
+                                )
+                            except Exception:
+                                logger.warning(
+                                    "searxng.chroma_store_failed url=%s", url,
+                                    exc_info=True,
+                                )
                     else:
                         logger.info("Skipping search result score TOO LOW")
 
@@ -89,20 +113,23 @@ async def search_source(source_url: str, topic: str, callback=None) -> List[Dict
         "time_range": "week",
     }  # Narrow to current week
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(timeout=_HTTP_TIMEOUT) as session:
         async with session.get(url, params=params, ssl=True) as response:
             if response.status == 200:
                 data = await response.text()
-                data = json.loads(data)
+                search_results = _parse_results(data)
                 results = []
 
-                for result in data.get("results", []):
+                for result in search_results:
                     title = result.get("title")
                     url = result.get("url")
                     score = result.get("score")
                     content = result.get("content")
 
-                    if score > RELEVANT_THRESHOLD:
+                    if (
+                        isinstance(score, (int, float))
+                        and score > RELEVANT_THRESHOLD
+                    ):
                         results.append(
                             {
                                 "url": url,

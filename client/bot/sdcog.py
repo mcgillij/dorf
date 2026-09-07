@@ -1,6 +1,8 @@
 import random
 import uuid
 import json
+import os
+import time
 import logging
 from io import BytesIO
 from pathlib import Path
@@ -54,7 +56,9 @@ class ImageGen(commands.Cog):
         self.photo_emoji = "📷"
         self.goblin_emoji = "👺"
         self.retry_emoji = "🔄"
-        self.unified_queue = asyncio.Queue()  # In-memory queue for image generation
+        # Bounded queue: cap pending image jobs so ComfyUI can't fall
+        # hopelessly behind (use put_nowait + QueueFull at call sites).
+        self.unified_queue = asyncio.Queue(maxsize=20)
         self.image_processing_task = self.bot.loop.create_task(
             self.process_unified_queue()
         )
@@ -90,9 +94,14 @@ class ImageGen(commands.Cog):
                     image = process_image_data(image_data)
                     file_path, file_name = save_image_to_input_dir(image)
                     logger.info(f"Here is ctx.message{ctx.message}")
-                    await self.generate_and_send_images(
-                        file_name, ctx.message, user_prompt=user_prompt, photo=False
-                    )
+                    try:
+                        await self.generate_and_send_images(
+                            file_name, ctx.message, user_prompt=user_prompt, photo=False
+                        )
+                    finally:
+                        # ComfyUI reads the temp input during execution, so only
+                        # remove it once get_images has finished.
+                        cleanup_temp_input(file_path)
                 elif task_type == "photo":
                     logger.info(f"Processing photo image request")
                     ctx = data["ctx"]
@@ -104,9 +113,14 @@ class ImageGen(commands.Cog):
                     image = process_image_data(image_data)
                     file_path, file_name = save_image_to_input_dir(image)
                     logger.info(f"Here is ctx.message{ctx.message}")
-                    await self.generate_and_send_images(
-                        file_name, ctx.message, user_prompt=user_prompt, photo=True
-                    )
+                    try:
+                        await self.generate_and_send_images(
+                            file_name, ctx.message, user_prompt=user_prompt, photo=True
+                        )
+                    finally:
+                        # ComfyUI reads the temp input during execution, so only
+                        # remove it once get_images has finished.
+                        cleanup_temp_input(file_path)
                 elif task_type == "reaction":
                     logger.info(f"here is my {data}")
                     attachment_url = data["attachment_url"]
@@ -181,29 +195,41 @@ class ImageGen(commands.Cog):
             if message.attachments:
                 attachment_url = message.attachments[0].url
                 if reaction.emoji == str(self.goblin_emoji):
-                    await self.unified_queue.put(
-                        (
-                            "goblin",
-                            {
-                                "attachment_url": attachment_url,
-                                "message": message,
-                                "photo": photo,
-                            },
+                    try:
+                        self.unified_queue.put_nowait(
+                            (
+                                "goblin",
+                                {
+                                    "attachment_url": attachment_url,
+                                    "message": message,
+                                    "photo": photo,
+                                },
+                            )
                         )
-                    )
-                    logger.info("Goblin request gone through")
+                        logger.info("Goblin request gone through")
+                    except asyncio.QueueFull:
+                        logger.warning("Image queue is full; dropping goblin request")
+                        await message.channel.send(
+                            "The image queue is full, try again in a bit."
+                        )
                 else:
-                    await self.unified_queue.put(
-                        (
-                            "reaction",
-                            {
-                                "attachment_url": attachment_url,
-                                "message": message,
-                                "photo": photo,
-                            },
+                    try:
+                        self.unified_queue.put_nowait(
+                            (
+                                "reaction",
+                                {
+                                    "attachment_url": attachment_url,
+                                    "message": message,
+                                    "photo": photo,
+                                },
+                            )
                         )
-                    )
-                    logger.info("Reaction added to unified queue.")
+                        logger.info("Reaction added to unified queue.")
+                    except asyncio.QueueFull:
+                        logger.warning("Image queue is full; dropping reaction request")
+                        await message.channel.send(
+                            "The image queue is full, try again in a bit."
+                        )
 
     async def process_reaction(
         self,
@@ -223,17 +249,22 @@ class ImageGen(commands.Cog):
                         # Process the image
                         image = process_image_data(image_data)
                         file_path, file_name = save_image_to_input_dir(image)
-                        if goblin:
-                            await self.generate_and_send_images(
-                                file_name,
-                                message,
-                                user_prompt="Make the people in the images look like Orcs, green skin orc teeth, angry scowl",
-                                photo=True,  # force photo True to have the denoise set higher
-                            )
-                        else:
-                            await self.generate_and_send_images(
-                                file_name, message, user_prompt=None, photo=photo
-                            )
+                        try:
+                            if goblin:
+                                await self.generate_and_send_images(
+                                    file_name,
+                                    message,
+                                    user_prompt="Make the people in the images look like Orcs, green skin orc teeth, angry scowl",
+                                    photo=True,  # force photo True to have the denoise set higher
+                                )
+                            else:
+                                await self.generate_and_send_images(
+                                    file_name, message, user_prompt=None, photo=photo
+                                )
+                        finally:
+                            # ComfyUI reads the temp input during execution, so only
+                            # remove it once get_images has finished.
+                            cleanup_temp_input(file_path)
                     else:
                         logger.error(
                             f"Failed to download image: HTTP {response.status}"
@@ -288,11 +319,20 @@ class ImageGen(commands.Cog):
 
         logger.info(f"Updated prompt: {prompt}")
 
-    def queue_prompt(self, prompt):
+    async def queue_prompt(self, prompt):
         p = {"prompt": prompt, "client_id": self.client_id}
         data = json.dumps(p).encode("utf-8")
-        req = urllib.request.Request(f"http://{self.server_address}/prompt", data=data)
-        return json.loads(urllib.request.urlopen(req).read())
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                f"http://{self.server_address}/prompt", data=data
+            ) as response:
+                body = await response.text()
+                if response.status != 200:
+                    raise RuntimeError(
+                        f"ComfyUI /prompt failed: status={response.status} body={body[:200]}"
+                    )
+                return json.loads(body)
 
     async def get_image(self, filename, subfolder, folder_type):
         data = {"filename": filename, "subfolder": subfolder, "type": folder_type}
@@ -303,11 +343,18 @@ class ImageGen(commands.Cog):
             async with session.get(url) as response:
                 return await response.read()
 
-    def get_history(self, prompt_id):
-        with urllib.request.urlopen(
-            f"http://{self.server_address}/history/{prompt_id}"
-        ) as response:
-            return json.loads(response.read())
+    async def get_history(self, prompt_id):
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(
+                f"http://{self.server_address}/history/{prompt_id}"
+            ) as response:
+                body = await response.text()
+                if response.status != 200:
+                    raise RuntimeError(
+                        f"ComfyUI /history failed: status={response.status}"
+                    )
+                return json.loads(body)
 
     async def get_images(self, prompt):
         logging.info("Connecting to WebSocket server...")
@@ -317,17 +364,27 @@ class ImageGen(commands.Cog):
         ) as ws:
             logging.info("Connected to WebSocket server.")
 
-            prompt_id = self.queue_prompt(prompt).get("prompt_id")
+            prompt_id = (await self.queue_prompt(prompt)).get("prompt_id")
             if not prompt_id:
                 logging.error("No prompt_id returned.")
                 raise RuntimeError("No prompt_id returned")
 
             logging.info(f"Prompt ID received: {prompt_id}")
+            # Bounded waits: a wedged ComfyUI used to hang the sole queue
+            # processor forever (no recv timeout at all).
+            recv_timeout_s = float(os.getenv("COMFY_RECV_TIMEOUT_S", "300"))
+            overall_deadline = time.monotonic() + float(
+                os.getenv("COMFY_OVERALL_TIMEOUT_S", "900")
+            )
 
             while True:
+                if time.monotonic() > overall_deadline:
+                    raise TimeoutError(
+                        f"ComfyUI job did not finish within {int(overall_deadline - time.monotonic() + 900)}s"
+                    )
                 logging.info("Waiting for WebSocket message...")
                 try:
-                    out = await ws.recv()
+                    out = await asyncio.wait_for(ws.recv(), timeout=recv_timeout_s)
                     # logging.info(f"Message received: {out}")
                 except websockets.exceptions.ConnectionClosedError as e:
                     logging.error(f"WebSocket connection closed: {e}")
@@ -353,7 +410,7 @@ class ImageGen(commands.Cog):
                         logging.warning(f"Unexpected message type: {message['type']}")
 
             logging.info("Fetching history...")
-            history = self.get_history(prompt_id).get(prompt_id, {})
+            history = (await self.get_history(prompt_id)).get(prompt_id, {})
             output_images = {}
             for node_id, node_output in history.get("outputs", {}).items():
                 if "images" in node_output:
@@ -370,6 +427,7 @@ class ImageGen(commands.Cog):
             return output_images
 
     @commands.command(name="generate", aliases=["spack", "dnd", "spork"])
+    @commands.cooldown(2, 60.0, commands.BucketType.user)
     async def generate_image_request(self, ctx, *, parameter: str = ""):
         """Generates Image based on, !spack, !dnd <character>:str, !spork <prompt>:str"""
         invoked_alias = ctx.invoked_with  # Get the alias or command name used
@@ -385,8 +443,15 @@ class ImageGen(commands.Cog):
                     "Character must be one of: alvys, iancan, crumb, halberd, yara"
                 )
                 return
+            try:
+                self.unified_queue.put_nowait(
+                    ("dnd", {"ctx": ctx, "character": parameter})
+                )
+            except asyncio.QueueFull:
+                logger.warning("Image queue is full; rejecting request")
+                await ctx.send("The image queue is full, try again in a bit.")
+                return
             await ctx.send("Your request has been added to the queue. Please wait...")
-            await self.unified_queue.put(("dnd", {"ctx": ctx, "character": parameter}))
         elif invoked_alias == "spork":
             if ctx.guild is not None:
                 await ctx.send("This command can only be used in DMs.")
@@ -394,11 +459,23 @@ class ImageGen(commands.Cog):
             if parameter == "":
                 await ctx.send("You must provide a prompt for the spork command.")
                 return
+            try:
+                self.unified_queue.put_nowait(
+                    ("spork", {"ctx": ctx, "prompt": parameter})
+                )
+            except asyncio.QueueFull:
+                logger.warning("Image queue is full; rejecting request")
+                await ctx.send("The image queue is full, try again in a bit.")
+                return
             await ctx.send("Your request has been added to the queue. Please wait...")
-            await self.unified_queue.put(("spork", {"ctx": ctx, "prompt": parameter}))
         else:  # Default to spack
+            try:
+                self.unified_queue.put_nowait(("spack", {"ctx": ctx}))
+            except asyncio.QueueFull:
+                logger.warning("Image queue is full; rejecting request")
+                await ctx.send("The image queue is full, try again in a bit.")
+                return
             await ctx.send("Your request has been added to the queue. Please wait...")
-            await self.unified_queue.put(("spack", {"ctx": ctx}))
 
     async def process_dnd_image_request(self, ctx, character):
         logger.info(
@@ -465,6 +542,7 @@ class ImageGen(commands.Cog):
         )
 
     @commands.command(name="photo", aliases=["ph"])
+    @commands.cooldown(2, 60.0, commands.BucketType.user)
     async def generate_photo_image(self, ctx, *, prompt: str):
         """Uses an attached image to generate a photo based on a user-provided prompt. format: !photo <prompt>:str (attached image)"""
         if ctx.guild is not None:
@@ -480,8 +558,6 @@ class ImageGen(commands.Cog):
             await ctx.send("Please attach a valid image file (PNG, JPG, or JPEG).")
             return
 
-        await ctx.send("Your request has been added to the queue. Please wait...")
-
         try:
             # Fetch the image
             image_data = await attachment.read()
@@ -492,11 +568,16 @@ class ImageGen(commands.Cog):
             self.unified_queue.put_nowait(
                 ("photo", {"ctx": ctx, "image_data": image_data, "prompt": prompt})
             )
+            await ctx.send("Your request has been added to the queue. Please wait...")
+        except asyncio.QueueFull:
+            logger.warning("Image queue is full; rejecting request")
+            await ctx.send("The image queue is full, try again in a bit.")
         except Exception as e:
             logger.error(f"Error adding draw image task to queue: {e}")
             await ctx.send("Failed to add your request to the queue.")
 
     @commands.command(name="draw", aliases=["dr"])
+    @commands.cooldown(2, 60.0, commands.BucketType.user)
     async def generate_draw_image(self, ctx, *, prompt: str):
         """Uses an attached image to generate a drawing based on a user-provided prompt. format: !draw <prompt>:str (attached image)"""
         logger.info(f"Received draw image request from {ctx.author}: {prompt}")
@@ -512,8 +593,6 @@ class ImageGen(commands.Cog):
             await ctx.send("Please attach a valid image file (PNG, JPG, or JPEG).")
             return
 
-        await ctx.send("Your request has been added to the queue. Please wait...")
-
         try:
             # Fetch the image
             image_data = await attachment.read()
@@ -524,6 +603,10 @@ class ImageGen(commands.Cog):
             self.unified_queue.put_nowait(
                 ("draw", {"ctx": ctx, "image_data": image_data, "prompt": prompt})
             )
+            await ctx.send("Your request has been added to the queue. Please wait...")
+        except asyncio.QueueFull:
+            logger.warning("Image queue is full; rejecting request")
+            await ctx.send("The image queue is full, try again in a bit.")
         except Exception as e:
             logger.error(f"Error adding draw image task to queue: {e}")
             await ctx.send("Failed to add your request to the queue.")
@@ -598,6 +681,15 @@ def save_image_to_input_dir(image_data):
         tmp_file.write(image_data)
         file_path = Path(tmp_file.name)
     return (file_path, tmp_file.name)
+
+
+def cleanup_temp_input(file_path):
+    """Remove a temp ComfyUI input image once the workflow has consumed it."""
+    try:
+        if file_path is not None and os.path.exists(file_path):
+            os.remove(file_path)
+    except OSError:
+        logger.warning(f"Failed to remove temp input image: {file_path}")
 
 
 def resize_image(image, max_size):

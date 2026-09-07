@@ -84,11 +84,32 @@ async def process_response_queue(
                 logger.warning(
                     "voice_pipeline.bad_json queue=%s error=%s", queue_name, e
                 )
+                # Dead-letter with the raw payload instead of silently dropping.
+                await asyncio.to_thread(
+                    redis_client.lpush,
+                    VOICE_RESPONSE_DEAD_QUEUE,
+                    json.dumps({"raw": queued_item, "dead_reason": "bad_json"}),
+                )
                 continue
 
             attempt = int(data.get("attempt", 1) or 1)
-            unique_id = data["unique_id"]
-            message = data["message"]
+            # Field extraction outside the pipeline try used to KeyError the
+            # item into oblivion (already popped from the queue); route it to
+            # the dead-letter queue instead.
+            try:
+                unique_id = data["unique_id"]
+                message = data["message"]
+            except KeyError as e:
+                logger.warning(
+                    "voice_pipeline.missing_field queue=%s field=%s — dead-lettering",
+                    queue_name,
+                    e,
+                )
+                data["dead_reason"] = f"missing_field: {e}"
+                await asyncio.to_thread(
+                    redis_client.lpush, VOICE_RESPONSE_DEAD_QUEUE, json.dumps(data)
+                )
+                continue
             trace_id = data.get("trace_id") or str(uuid.uuid4())
             guild_id = data.get("guild_id")
             channel_id = data.get("channel_id")
@@ -149,6 +170,11 @@ async def process_response_queue(
                         ),
                     ),
                     echo_prompt_to_chat=ECHO_PROMPT_TO_CHAT,
+                    # `data` is the same dict that gets re-serialized on
+                    # requeue, so completed stages (llm_response, chat_sent,
+                    # tts_enqueued) persist across retries and are skipped
+                    # instead of re-run.
+                    progress=data,
                 )
             except Exception as e:
                 # LLMRequestError and other pipeline failures requeue the item

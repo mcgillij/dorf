@@ -1,5 +1,6 @@
 import io
 import sqlite3
+import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
 
@@ -115,6 +116,10 @@ class Metrics(commands.Cog):
     @tasks.loop(hours=24)
     async def aggregate_metrics(self):
         one_week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        # Compare like-for-like: the column stores SQLite CURRENT_TIMESTAMP
+        # ("YYYY-MM-DD HH:MM:SS"); isoformat() only worked by accident of
+        # ' ' < 'T' in lexical comparison.
+        cutoff = one_week_ago.strftime("%Y-%m-%d %H:%M:%S")
         with sqlite3.connect(METRICS_DB) as conn:
             c = conn.cursor()
             c.execute(
@@ -124,9 +129,16 @@ class Metrics(commands.Cog):
                 WHERE timestamp <= ?
                 GROUP BY week, type, name
             """,
-                (one_week_ago.isoformat(),),
+                (cutoff,),
             )
             results = c.fetchall()
+
+            # Replace each re-aggregated week's rows instead of appending:
+            # daily runs previously re-inserted the same (week, type, name)
+            # rows forever, double-counting them in weekly_summary.
+            weeks = {week for week, _, _, _ in results}
+            for week in weeks:
+                c.execute("DELETE FROM weekly_metrics WHERE week = ?", (week,))
 
             for week, typ, name, count in results:
                 c.execute(
@@ -139,7 +151,7 @@ class Metrics(commands.Cog):
 
             c.execute(
                 "DELETE FROM bot_usage WHERE timestamp <= ?",
-                (one_week_ago.isoformat(),),
+                (cutoff,),
             )
             conn.commit()
 
@@ -147,7 +159,12 @@ class Metrics(commands.Cog):
     async def before_aggregate_metrics(self):
         await self.bot.wait_until_ready()
 
-    def create_plot_and_send(self, ctx, df, title, xlabel, ylabel):
+    async def create_plot_and_send(self, ctx, df, title, xlabel, ylabel):
+        """Render the plot off the event loop: matplotlib + pandas block for
+        hundreds of ms, and this loop drives both bots + the voice pipeline."""
+        return await asyncio.to_thread(self._render_plot, df, title, xlabel, ylabel)
+
+    def _render_plot(self, df, title, xlabel, ylabel):
         rcParams["font.family"] = "Symbola"
 
         plt.figure(figsize=(10, 6))
@@ -177,7 +194,7 @@ class Metrics(commands.Cog):
                 conn,
             )
         df.set_index("emoji", inplace=True)
-        file = self.create_plot_and_send(ctx, df, "Top Emojis", "Emoji", "Usage Count")
+        file = await self.create_plot_and_send(ctx, df, "Top Emojis", "Emoji", "Usage Count")
         await ctx.send(file=file)
 
     @commands.command(name="emoji_trends")
@@ -196,7 +213,7 @@ class Metrics(commands.Cog):
                 params=(emoji_char,),
             )
         df.set_index("day", inplace=True)
-        file = self.create_plot_and_send(
+        file = await self.create_plot_and_send(
             ctx, df, f"Usage Trend: {emoji_char}", "Date", "Usage Count"
         )
         await ctx.send(file=file)
@@ -215,7 +232,7 @@ class Metrics(commands.Cog):
                 conn,
             )
         pivot = df.pivot(index="day", columns="type", values="count").fillna(0)
-        file = self.create_plot_and_send(
+        file = await self.create_plot_and_send(
             ctx, pivot, "Bot Activity Over Time", "Date", "Count"
         )
         await ctx.send(file=file)
@@ -300,7 +317,7 @@ class Metrics(commands.Cog):
 
         pivot.index = display_names
 
-        file = self.create_plot_and_send(
+        file = await self.create_plot_and_send(
             ctx, pivot, "Top Channels by Type", "Channel", "Count"
         )
         await ctx.send(file=file)
@@ -318,7 +335,7 @@ class Metrics(commands.Cog):
                 conn,
             )
         df.set_index("name", inplace=True)
-        file = self.create_plot_and_send(ctx, df, "Top Commands", "Command", "Count")
+        file = await self.create_plot_and_send(ctx, df, "Top Commands", "Command", "Count")
         await ctx.send(file=file)
 
     @commands.command(name="weekly_summary")
@@ -333,7 +350,7 @@ class Metrics(commands.Cog):
                 conn,
             )
         pivot = df.pivot(index="week", columns="type", values="total").fillna(0)
-        file = self.create_plot_and_send(
+        file = await self.create_plot_and_send(
             ctx, pivot, "Weekly Bot Summary", "Week", "Total"
         )
         await ctx.send(file=file)
@@ -352,7 +369,7 @@ class Metrics(commands.Cog):
                 params=(command_name,),
             )
         df.set_index("day", inplace=True)
-        file = self.create_plot_and_send(
+        file = await self.create_plot_and_send(
             ctx, df, f"Usage Trend: {command_name}", "Date", "Count"
         )
         await ctx.send(file=file)

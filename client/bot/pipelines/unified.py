@@ -131,6 +131,7 @@ async def run_unified_response_pipeline(
     human_in_voice_channel: bool,
     ctx: RequestContext,
     echo_prompt_to_chat: bool = True,
+    progress: Optional[dict] = None,
 ) -> str:
     """Unified pipeline:
 
@@ -141,8 +142,13 @@ async def run_unified_response_pipeline(
     - optionally enqueue TTS
 
     All Redis operations are pushed off the event loop via asyncio.to_thread.
+
+    `progress` (optional, mutated in place) records completed stages so a
+    requeued retry resumes instead of re-running side effects (duplicate
+    chat messages / duplicate LLM calls).
     """
 
+    progress = progress if progress is not None else {}
     started = time.time()
     logger.info(
         "pipeline.start source=%s persona=%s trace_id=%s unique_id=%s guild_id=%s channel_id=%s user_id=%s",
@@ -158,30 +164,52 @@ async def run_unified_response_pipeline(
     if echo_prompt_to_chat:
         await send_text(send, prompt_text)
 
-    response_text = await bot_instance.llm.get_response(prompt_text)
-    response_text = response_text or ""
+    if "llm_response" in progress:
+        response_text = progress["llm_response"] or ""
+        logger.info(
+            "pipeline.resume_llm trace_id=%s unique_id=%s len=%s",
+            ctx.trace_id,
+            unique_id,
+            len(response_text),
+        )
+    else:
+        response_text = await bot_instance.llm.get_response(prompt_text)
+        response_text = response_text or ""
+        progress["llm_response"] = response_text
 
-    await send_text(send, response_text)
+    if not progress.get("chat_sent"):
+        await send_text(send, response_text)
+        progress["chat_sent"] = True
 
-    final_for_voice = await summarize_if_needed(
-        response_text=response_text,
-        unique_id=unique_id,
-        summarizer_queue=summarizer_queue_name,
-        ctx=ctx,
-    )
+    if "final_for_voice" in progress:
+        final_for_voice = progress["final_for_voice"]
+    else:
+        final_for_voice = await summarize_if_needed(
+            response_text=response_text,
+            unique_id=unique_id,
+            summarizer_queue=summarizer_queue_name,
+            ctx=ctx,
+        )
+        progress["final_for_voice"] = final_for_voice
 
-    if final_for_voice != response_text:
+    if final_for_voice != response_text and not progress.get("summary_sent"):
         await send_text(send, final_for_voice)
+        progress["summary_sent"] = True
 
     spoken = final_for_voice if final_for_voice else response_text
     if human_in_voice_channel:
-        if spoken and spoken.strip():
+        if progress.get("tts_enqueued"):
+            logger.info(
+                "pipeline.resume_skip_tts trace_id=%s unique_id=%s", ctx.trace_id, unique_id
+            )
+        elif spoken and spoken.strip():
             await enqueue_tts(
                 audio_queue_name=audio_queue_name,
                 unique_id=unique_id,
                 messages=[spoken],
                 ctx=ctx,
             )
+            progress["tts_enqueued"] = True
         else:
             # An empty string used to reach kokoro and die there silently;
             # skip it explicitly.

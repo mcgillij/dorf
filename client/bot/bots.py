@@ -109,13 +109,20 @@ class BaseBot(commands.Bot):
         loop guard, or a crash that kills the task), it is restarted with
         exponential backoff so a single failure can't silently kill the voice
         pipeline.
+
+        The once-guard lives in the caller: only call this from a
+        `_workers_started`-guarded section whose flag was claimed
+        synchronously (before any await), so a second on_ready task can never
+        reach it.
         """
-        if self._workers_started:
-            return
-        self._workers_started = True
         for worker_name, factory in factories:
             task = self.spawn_supervised(worker_name, factory)
             self._worker_tasks.append(task)
+        # Capture health watchdog (recovers from voice_recv Opus decode
+        # failures). Spawned here so it is covered by the same once-guard as
+        # the workers and can never be created twice.
+        task = self.spawn_supervised("capture_watchdog", voice_capture_watchdog)
+        self._worker_tasks.append(task)
 
     def spawn_supervised(self, worker_name, factory):
         """Run `factory(self)` forever, restarting it with backoff if it dies."""
@@ -215,6 +222,7 @@ class BaseBot(commands.Bot):
 
 
 @commands.command()
+@commands.cooldown(3, 30.0, commands.BucketType.user)
 async def derf(ctx, *, message: str):
     logger.info("in derf")
     if ctx.bot.statemanager:
@@ -230,10 +238,29 @@ async def derf(ctx, *, message: str):
         await asyncio.to_thread(ctx.bot.statemanager.update_state_idle)
 
 
+@derf.error
+async def derf_error(ctx, error):
+    # Cooldown hits are user noise, not bugs; everything else re-raises
+    # so the normal error handling is untouched.
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(f"Slow down — try again in {error.retry_after:.0f}s")
+        return
+    raise error
+
+
 @commands.command()
+@commands.cooldown(3, 30.0, commands.BucketType.user)
 async def nic(ctx, *, message: str):
     uid = await queue_nic_message_processing(ctx, message)
     await process_nic_response(ctx, uid)
+
+
+@nic.error
+async def nic_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(f"Slow down — try again in {error.retry_after:.0f}s")
+        return
+    raise error
 
 
 class NicBot(BaseBot):
@@ -248,6 +275,9 @@ class NicBot(BaseBot):
         logger.info(f"{self.name} is ready. Connecting voice + starting capture...")
 
         if not self._workers_started:
+            # Claim the guard synchronously (before any await) so a second
+            # on_ready task can never re-enter this block on a reconnect.
+            self._workers_started = True
             self.spawn_workers(
                 [
                     ("nic_audio", nic_audio_task),
@@ -258,8 +288,6 @@ class NicBot(BaseBot):
                     ("nic_voice_control", monitor_voice_control_queue),
                 ]
             )
-            task = self.spawn_supervised("capture_watchdog", voice_capture_watchdog)
-            self._worker_tasks.append(task)
 
         await connect_to_voice(self)
 
@@ -288,6 +316,12 @@ class DerfBot(BaseBot):
         logger.info(f"{self.name} is ready. Connecting voice + starting capture...")
 
         if not self._workers_started:
+            # Claim the guard synchronously (before any await): discord.py
+            # dispatches a new on_ready task per gateway READY, so a second
+            # task landing while load_extension below awaits must not
+            # re-enter this block and double-load extensions or spawn a
+            # competing watchdog.
+            self._workers_started = True
             for extension in EXTENTIONS:
                 if extension not in self.extensions:
                     try:
@@ -313,9 +347,6 @@ class DerfBot(BaseBot):
                     ("derf_voice_control", monitor_voice_control_queue),
                 ]
             )
-            # Capture health watchdog (recovers from voice_recv Opus decode failures).
-            task = self.spawn_supervised("capture_watchdog", voice_capture_watchdog)
-            self._worker_tasks.append(task)
 
         await connect_to_voice(self)
         logger.info(f"{self.name} setup complete")

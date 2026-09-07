@@ -320,6 +320,15 @@ class NewsAgent(commands.Cog):
                 "Cannot add a task without user preferences or location set."
             )
 
+        cursor.execute(
+            "SELECT COUNT(*) FROM scheduled_tasks WHERE user_id = ?",
+            (user_id,),
+        )
+        if cursor.fetchone()[0] >= 5:
+            await ctx.send("You already have 5 tasks — remove one first.")
+            return
+
+        interval = max(5, interval)  # interval 0 would busy-loop the LLM
         self.add_task(user_id, task_name, interval)
         await ctx.send(
             f"Task '{task_name}' added with an interval of {interval} minutes."
@@ -329,6 +338,19 @@ class NewsAgent(commands.Cog):
     async def remove_task_command(self, ctx, task_id: int):
         """Remove task id. format: <id>:int"""
         """Remove a scheduled task by its ID."""
+        cursor = self.db.cursor()
+        cursor.execute(
+            "SELECT user_id FROM scheduled_tasks WHERE id = ?", (task_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            await ctx.send(f"No task with ID {task_id}.")
+            return
+        is_owner = row[0] == ctx.author.id
+        is_mod = bool(ctx.guild and ctx.author.guild_permissions.manage_guild)
+        if not (is_owner or is_mod):
+            await ctx.send("You can only remove your own tasks.")
+            return
         self.remove_task(task_id)
         await ctx.send(f"Task with ID {task_id} has been removed.")
 

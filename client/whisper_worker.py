@@ -6,8 +6,9 @@ import wave
 import uuid
 import logging
 import asyncio
+import fnmatch
 import aiohttp
-from bot.db import SQLiteDB
+from bot.db import SQLiteDB, ensure_sqlite_pragmas
 from bot.redis_client import redis_client
 from bot.constants import (
     WHISPER_QUEUE,
@@ -171,6 +172,13 @@ class WhisperWorker:
         # A job stuck in inflight longer than this is considered stranded
         # (requeued by the idle reaper). Must exceed the whisper HTTP timeout.
         self._lease_s = int(os.getenv("WHISPER_LEASE_S", "120"))
+        # Retention for captured utterance wavs: only the success paths in
+        # process_audio delete a job's wav, so everything older than this is
+        # swept hourly (see sweep_old_audio) to bound disk usage.
+        self._audio_root = os.getenv("USER_AUDIO_DIR", "user_audio")
+        self._retention_hours = float(
+            os.getenv("USER_AUDIO_RETENTION_HOURS", "24")
+        )
         self._lock_token = f"{os.getpid()}-{int(time.time())}"
 
     async def _acquire_singleton_lock(self) -> None:
@@ -218,9 +226,85 @@ class WhisperWorker:
             logger.warning("whisper.inflight_requeued moved=%s", moved)
         return moved
 
+    async def sweep_old_audio(self) -> None:
+        """Delete captured utterance wavs older than the retention window.
+
+        Unrouted utterances, whisper failures and dead-lettered jobs keep
+        their wavs on disk forever (only the success paths unlink them);
+        this hourly sweep bounds that growth.
+        """
+        deleted_files, deleted_bytes, deleted_dirs = await asyncio.to_thread(
+            self._sweep_old_audio_sync
+        )
+        logger.info(
+            "whisper.audio_sweep_done files=%s bytes=%s dirs=%s root=%s retention_h=%s",
+            deleted_files,
+            deleted_bytes,
+            deleted_dirs,
+            self._audio_root,
+            self._retention_hours,
+        )
+
+    def _sweep_old_audio_sync(self) -> tuple[int, int, int]:
+        """Walk the audio root, unlink stale chunk wavs, prune empty dirs.
+
+        Returns (deleted_files, deleted_bytes, deleted_dirs). Runs in a
+        thread; per-file failures are logged and skipped.
+        """
+        cutoff = time.time() - self._retention_hours * 3600.0
+        root_abs = os.path.abspath(self._audio_root)
+        deleted_files = 0
+        deleted_bytes = 0
+        deleted_dirs = 0
+        for dirpath, _dirnames, filenames in os.walk(self._audio_root):
+            for name in filenames:
+                if not (
+                    fnmatch.fnmatch(name, "chunk-*.wav")
+                    or fnmatch.fnmatch(name, "*-original.wav")
+                ):
+                    continue
+                path = os.path.join(dirpath, name)
+                try:
+                    st = os.stat(path)
+                except OSError:
+                    logger.warning(
+                        "whisper.audio_sweep_stat_failed path=%s",
+                        path,
+                        exc_info=True,
+                    )
+                    continue
+                if st.st_mtime >= cutoff:
+                    continue
+                try:
+                    os.remove(path)
+                except OSError:
+                    logger.warning(
+                        "whisper.audio_sweep_remove_failed path=%s",
+                        path,
+                        exc_info=True,
+                    )
+                    continue
+                deleted_files += 1
+                deleted_bytes += st.st_size
+        # Prune user dirs the sweep emptied (deepest first). rmdir only
+        # succeeds on empty dirs, so the root and non-empty dirs survive.
+        for dirpath, _dirnames, _filenames in os.walk(
+            self._audio_root, topdown=False
+        ):
+            if os.path.abspath(dirpath) == root_abs:
+                continue
+            try:
+                os.rmdir(dirpath)
+            except OSError:
+                continue
+            deleted_dirs += 1
+        return deleted_files, deleted_bytes, deleted_dirs
+
     async def process_audio(self):
         """Process audio paths from the Redis queue."""
         _ensure_logging_configured()
+        # WAL + busy_timeout before anything touches the DBs (idempotent).
+        ensure_sqlite_pragmas(("voice_responses.db",))
         # Connect to Redis
         logger.info("Connecting to Redis")
         if not await asyncio.to_thread(redis_client.ping):
@@ -245,6 +329,7 @@ class WhisperWorker:
             whisper_client = WhisperClient(session, url=self._whisper_url)
             last_job_time = 0.0
             last_idle_log = 0.0
+            last_sweep = 0.0
             last_lock_refresh = 0.0
             last_reap = 0.0
             while True:
@@ -324,6 +409,16 @@ class WhisperWorker:
                                 idle_for,
                             )
                             last_idle_log = now
+                        # Periodic retention sweep: wavs from unrouted,
+                        # failed and dead-lettered jobs are never unlinked
+                        # on the job paths, so remove stale ones here. A
+                        # sweep failure must never kill the worker loop.
+                        if now - last_sweep >= 3600.0:
+                            last_sweep = now
+                            try:
+                                await self.sweep_old_audio()
+                            except Exception:
+                                logger.exception("whisper.audio_sweep_failed")
                         continue
 
                     # Value contains JSON metadata.
@@ -504,7 +599,14 @@ class WhisperWorker:
 
                     # Voice control: stop/shut-up only counts when addressed to a bot,
                     # so ordinary speech containing "stop" can't kill the pipeline.
-                    if stop_pattern.search(text_response):
+                    # The stop phrase must be (nearly) the whole utterance — a
+                    # substring match hijacked legitimate questions like
+                    # "when does the bus stop arriving?".
+                    _stop_is_question = (
+                        len(text_response) > 25
+                        and not stop_pattern.fullmatch(text_response.strip())
+                    )
+                    if stop_pattern.search(text_response) and not _stop_is_question:
                         # Duplicate suppression: a requeued copy of this job
                         # must not fire a second stop.
                         if trace_id:
