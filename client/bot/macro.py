@@ -15,16 +15,14 @@ class MacroCog(commands.Cog):
 
     def _create_table(self):
         with self.db:
-            self.db.execute(
-                """CREATE TABLE IF NOT EXISTS macros (
+            self.db.execute("""CREATE TABLE IF NOT EXISTS macros (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id INTEGER,
                     name TEXT,
                     response TEXT,
                     created_by TEXT,
                     UNIQUE(guild_id, name)
-                )"""
-            )
+                )""")
 
     @commands.command()
     async def addmacro(self, ctx, name: str, *, response: str):

@@ -11,8 +11,7 @@ conn = sqlite3.connect("quotes.db")
 c = conn.cursor()
 
 # Ensure quotes table exists
-c.execute(
-    """
+c.execute("""
 CREATE TABLE IF NOT EXISTS quotes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     author TEXT,
@@ -22,8 +21,7 @@ CREATE TABLE IF NOT EXISTS quotes (
     source TEXT,
     pinned BOOLEAN DEFAULT 0
 )
-"""
-)
+""")
 conn.commit()
 
 

@@ -1,7 +1,6 @@
-import os
-from random import choice
 import logging
 import time
+from random import choice
 
 import asyncio
 import discord
@@ -46,7 +45,6 @@ from bot.constants import (
     FILTERED_RESPONSES,
 )
 from bot.config import AUTH_TOKEN
-
 
 logger = logging.getLogger(__name__)
 
@@ -93,73 +91,77 @@ NIC_EXTENTIONS = ["bot.insulter"]
 
 
 class BaseBot(commands.Bot):
-    def __init__(self, name, prefix, *args, **kwargs):
+    def __init__(self, name, prefix, persona, *args, **kwargs):
         super().__init__(command_prefix=prefix, intents=INTENTS, *args, **kwargs)
         self.name = name
+        self.persona = persona
         # Optional cog; some workers (e.g., playback) check this attribute.
         self.statemanager = None
-        self.add_listener(self.on_ready)
+        # on_ready can fire again after a full reconnect; workers must only
+        # ever be spawned once or competing consumers corrupt the queues.
+        self._workers_started = False
+        self._worker_tasks = []
+
+    def spawn_workers(self, factories):
+        """Start each (name, coroutine_fn) worker once per bot process.
+
+        Workers are supervised: if one dies (an exception outside its internal
+        loop guard, or a crash that kills the task), it is restarted with
+        exponential backoff so a single failure can't silently kill the voice
+        pipeline.
+        """
+        if self._workers_started:
+            return
+        self._workers_started = True
+        for worker_name, factory in factories:
+            task = self.spawn_supervised(worker_name, factory)
+            self._worker_tasks.append(task)
+
+    def spawn_supervised(self, worker_name, factory):
+        """Run `factory(self)` forever, restarting it with backoff if it dies."""
+
+        async def _runner():
+            delay = 1.0
+            while True:
+                started = time.monotonic()
+                try:
+                    await factory(self)
+                    # Workers are while-True loops; a normal return means the
+                    # loop broke unexpectedly.
+                    logger.warning(
+                        "%s worker %s exited unexpectedly; restarting.",
+                        self.name,
+                        worker_name,
+                    )
+                except asyncio.CancelledError:
+                    logger.info(
+                        "%s worker %s cancelled; not restarting.",
+                        self.name,
+                        worker_name,
+                    )
+                    raise
+                except Exception:
+                    logger.exception(
+                        "%s worker %s crashed; restarting in %.1fs.",
+                        self.name,
+                        worker_name,
+                        delay,
+                    )
+                # A worker that ran healthy for a while resets the backoff; one
+                # that crash-loops backs off up to a minute. Sleep with the
+                # current delay first so the first restart is quick.
+                ran = time.monotonic() - started
+                await asyncio.sleep(delay)
+                if ran > 60.0:
+                    delay = 1.0
+                else:
+                    delay = min(delay * 2, 60.0)
+
+        task = asyncio.create_task(_runner(), name=f"{self.name}:{worker_name}")
+        return task
 
     async def on_ready(self):
         logger.info(f"{self.name} is ready.")
-
-
-@commands.command()
-async def derf(ctx, *, message: str):
-    logger.info("in derf")
-    if ctx.bot.statemanager:
-        ctx.bot.statemanager.update_state_thinking()
-    if filter_message(message):
-        await ctx.send(choice(FILTERED_RESPONSES))
-        return
-    uid = await queue_derf_message_processing(ctx, message)
-    if ctx.bot.statemanager:
-        ctx.bot.statemanager.update_state_talking()
-    await process_derf_response(ctx, uid)
-    if ctx.bot.statemanager:
-        ctx.bot.statemanager.update_state_idle()
-
-
-@commands.command()
-async def nic(ctx, *, message: str):
-    uid = await queue_nic_message_processing(ctx, message)
-    await process_nic_response(ctx, uid)
-
-
-class NicBot(BaseBot):
-    def __init__(self, *args, **kwargs):
-        super().__init__(name="nic_bot", prefix="#", *args, **kwargs)
-        self.add_command(nic)
-        self.llm = LLMClient(AUTH_TOKEN, NIC_WORKSPACE, NIC_SESSION_ID)
-
-    async def on_ready(self):
-        patch_voice_recv_opus_decoder()
-        await connect_to_voice(self)
-        worker_tasks = [
-            lambda: nic_audio_task(self),
-            lambda: playback_nic_task(self),
-            lambda: process_nic_response_queue(self),
-            lambda: process_nic_summarizer_queue(self),
-            lambda: monitor_nic_response_queue(self),
-            lambda: monitor_voice_control_queue(self),
-        ]
-        for task in worker_tasks:
-            asyncio.create_task(task())
-        logger.info(f"{self.name} setup complete")
-
-        for extension in NIC_EXTENTIONS:
-            if extension not in self.extensions:
-                await self.load_extension(extension)
-
-
-class DerfBot(BaseBot):
-    def __init__(self, *args, **kwargs):
-        super().__init__(name="derfbot", prefix="!", *args, **kwargs)
-        logger.info("attaching derf command")
-        self.add_command(derf)
-        self.add_listener(self.on_voice_state_update)
-        self.llm = LLMClient(AUTH_TOKEN, WORKSPACE, SESSION_ID)
-        self.statemanager = None
 
     async def handle_voice_state_update(self, member, before, after):
         logger.info(
@@ -171,14 +173,23 @@ class DerfBot(BaseBot):
                 logger.info(f"{self.name} joined a voice channel, starting capture.")
                 await start_capture(member.guild, after.channel, self)
             elif not after.channel and before.channel:
-                suppress_until = getattr(self, "_suppress_voice_reconnect_until", 0.0) or 0.0
+                suppress_until = (
+                    getattr(self, "_suppress_voice_reconnect_until", 0.0) or 0.0
+                )
                 if suppress_until and time.time() < suppress_until:
                     logger.info(
                         f"{self.name} disconnected as part of intentional reconnect; skipping on_voice_state_update reconnect."
                     )
                     return
                 logger.warning(f"{self.name} disconnected. Reconnecting...")
+                # connect_to_voice re-attaches the capture sink when it finishes.
                 await connect_to_voice(self)
+            elif after.channel and before.channel:
+                # Bot was moved between channels; re-point capture at the new one.
+                logger.info(
+                    f"{self.name} moved to {after.channel.name}, restarting capture."
+                )
+                await start_capture(member.guild, after.channel, self)
             return
 
         # For regular users:
@@ -188,6 +199,12 @@ class DerfBot(BaseBot):
                 # If bot is already connected, maybe do something
                 logger.info(f"Bot already connected, ensuring capture is active.")
                 await start_capture(member.guild, after.channel, self)
+        elif not after.channel and before.channel:
+            # User left voice entirely: drop their capture state (buffer, lock,
+            # context) so departed users don't leak memory in the sink.
+            sink = getattr(self, "voice_capture_sink", None)
+            if sink is not None:
+                sink.forget_user(member.id)
 
     async def on_voice_state_update(self, member, before, after):
         # Ignore other bots, but do process our own voice-state changes so we can
@@ -196,48 +213,109 @@ class DerfBot(BaseBot):
             return
         await self.handle_voice_state_update(member=member, before=before, after=after)
 
+
+@commands.command()
+async def derf(ctx, *, message: str):
+    logger.info("in derf")
+    if ctx.bot.statemanager:
+        await asyncio.to_thread(ctx.bot.statemanager.update_state_thinking)
+    if filter_message(message):
+        await ctx.send(choice(FILTERED_RESPONSES))
+        return
+    uid = await queue_derf_message_processing(ctx, message)
+    if ctx.bot.statemanager:
+        await asyncio.to_thread(ctx.bot.statemanager.update_state_talking)
+    await process_derf_response(ctx, uid)
+    if ctx.bot.statemanager:
+        await asyncio.to_thread(ctx.bot.statemanager.update_state_idle)
+
+
+@commands.command()
+async def nic(ctx, *, message: str):
+    uid = await queue_nic_message_processing(ctx, message)
+    await process_nic_response(ctx, uid)
+
+
+class NicBot(BaseBot):
+    def __init__(self, *args, **kwargs):
+        super().__init__(name="nic_bot", prefix="#", persona="nic", *args, **kwargs)
+        self.add_command(nic)
+        self.llm = LLMClient(AUTH_TOKEN, NIC_WORKSPACE, NIC_SESSION_ID)
+
     async def on_ready(self):
         await super().on_ready()
         patch_voice_recv_opus_decoder()
         logger.info(f"{self.name} is ready. Connecting voice + starting capture...")
 
-        for extension in EXTENTIONS:
-            if extension not in self.extensions:
-                await self.load_extension(extension)
-
-        self.statemanager = self.get_cog("StateManager")
-        if not self.statemanager:
-            logger.warning("StateManager cog not found!")
-        else:
-            logger.info("StateManager successfully loaded.")
+        if not self._workers_started:
+            self.spawn_workers(
+                [
+                    ("nic_audio", nic_audio_task),
+                    ("nic_playback", playback_nic_task),
+                    ("nic_response_worker", process_nic_response_queue),
+                    ("nic_summarizer", process_nic_summarizer_queue),
+                    ("nic_response_monitor", monitor_nic_response_queue),
+                    ("nic_voice_control", monitor_voice_control_queue),
+                ]
+            )
+            task = self.spawn_supervised("capture_watchdog", voice_capture_watchdog)
+            self._worker_tasks.append(task)
 
         await connect_to_voice(self)
 
-        # Start capture once for the configured channel after connection is established.
-        try:
-            guild_id = int(os.getenv("GUILD_ID", "0"))
-            channel_id = int(os.getenv("VOICE_CHANNEL_ID", "0"))
-        except ValueError:
-            guild_id, channel_id = 0, 0
+        for extension in NIC_EXTENTIONS:
+            if extension not in self.extensions:
+                try:
+                    await self.load_extension(extension)
+                except Exception:
+                    logger.exception(
+                        f"Failed to load extension {extension}; continuing without it."
+                    )
 
-        if guild_id and channel_id:
-            guild = discord.utils.get(self.guilds, id=guild_id)
-            if guild:
-                voice_channel = guild.get_channel(channel_id)
-                if isinstance(voice_channel, discord.VoiceChannel):
-                    await start_capture(guild, voice_channel, self)
+        logger.info(f"{self.name} setup complete")
 
-        # Capture health watchdog (recovers from voice_recv Opus decode failures).
-        asyncio.create_task(voice_capture_watchdog(self))
 
-        worker_tasks = [
-            lambda: derf_audio_task(self),
-            lambda: playback_derf_task(self),
-            lambda: process_derf_response_queue(self),
-            lambda: process_derf_summarizer_queue(self),
-            lambda: monitor_derf_response_queue(self),
-            lambda: monitor_voice_control_queue(self),
-        ]
-        for task in worker_tasks:
-            asyncio.create_task(task())
+class DerfBot(BaseBot):
+    def __init__(self, *args, **kwargs):
+        super().__init__(name="derfbot", prefix="!", persona="derf", *args, **kwargs)
+        logger.info("attaching derf command")
+        self.add_command(derf)
+        self.llm = LLMClient(AUTH_TOKEN, WORKSPACE, SESSION_ID)
+
+    async def on_ready(self):
+        await super().on_ready()
+        patch_voice_recv_opus_decoder()
+        logger.info(f"{self.name} is ready. Connecting voice + starting capture...")
+
+        if not self._workers_started:
+            for extension in EXTENTIONS:
+                if extension not in self.extensions:
+                    try:
+                        await self.load_extension(extension)
+                    except Exception:
+                        logger.exception(
+                            f"Failed to load extension {extension}; continuing without it."
+                        )
+
+            self.statemanager = self.get_cog("StateManager")
+            if not self.statemanager:
+                logger.warning("StateManager cog not found!")
+            else:
+                logger.info("StateManager successfully loaded.")
+
+            self.spawn_workers(
+                [
+                    ("derf_audio", derf_audio_task),
+                    ("derf_playback", playback_derf_task),
+                    ("derf_response_worker", process_derf_response_queue),
+                    ("derf_summarizer", process_derf_summarizer_queue),
+                    ("derf_response_monitor", monitor_derf_response_queue),
+                    ("derf_voice_control", monitor_voice_control_queue),
+                ]
+            )
+            # Capture health watchdog (recovers from voice_recv Opus decode failures).
+            task = self.spawn_supervised("capture_watchdog", voice_capture_watchdog)
+            self._worker_tasks.append(task)
+
+        await connect_to_voice(self)
         logger.info(f"{self.name} setup complete")

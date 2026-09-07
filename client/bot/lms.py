@@ -34,7 +34,9 @@ async def wrap_model_to_indian_translate(
     except Exception as e:
         logger.error(f"Error in wrap_model_to_indian_translate: {e}")
         if "bosToken" in str(e) or "ValidationError" in str(e):
-            logger.error("Model configuration error: The LMStudio model is missing required prompt template fields.")
+            logger.error(
+                "Model configuration error: The LMStudio model is missing required prompt template fields."
+            )
             return "Error: Model configuration issue. Please check your LMStudio model configuration."
         raise
 
@@ -59,7 +61,9 @@ async def wrap_model_qa_insult(model) -> str:
     except Exception as e:
         logger.error(f"Error in wrap_model_qa_insult: {e}")
         if "bosToken" in str(e) or "ValidationError" in str(e):
-            logger.error("Model configuration error: The LMStudio model is missing required prompt template fields.")
+            logger.error(
+                "Model configuration error: The LMStudio model is missing required prompt template fields."
+            )
             return "Error: Model configuration issue. Please check your LMStudio model configuration."
         raise
 
@@ -86,7 +90,9 @@ async def wrap_model_from_indian_translate(
     except Exception as e:
         logger.error(f"Error in wrap_model_from_indian_translate: {e}")
         if "bosToken" in str(e) or "ValidationError" in str(e):
-            logger.error("Model configuration error: The LMStudio model is missing required prompt template fields.")
+            logger.error(
+                "Model configuration error: The LMStudio model is missing required prompt template fields."
+            )
             return "Error: Model configuration issue. Please check your LMStudio model configuration."
         raise
 
@@ -111,7 +117,9 @@ async def wrap_model(model, query, on_message=None, callback=None) -> str:
     except Exception as e:
         logger.error(f"Error in wrap_model: {e}")
         if "bosToken" in str(e) or "ValidationError" in str(e):
-            logger.error("Model configuration error: The LMStudio model is missing required prompt template fields. Please check the model configuration in LMStudio.")
+            logger.error(
+                "Model configuration error: The LMStudio model is missing required prompt template fields. Please check the model configuration in LMStudio."
+            )
             return "Error: Model configuration issue. The model's prompt template is missing required fields (bosToken). Please check your LMStudio model configuration."
         raise
 
@@ -149,7 +157,9 @@ async def wrap_model_act(model, query, tools, on_message=None, callback=None) ->
     except Exception as e:
         logger.error(f"Error in wrap_model_act: {e}")
         if "bosToken" in str(e) or "ValidationError" in str(e):
-            logger.error("Model configuration error: The LMStudio model is missing required prompt template fields. Please check the model configuration in LMStudio.")
+            logger.error(
+                "Model configuration error: The LMStudio model is missing required prompt template fields. Please check the model configuration in LMStudio."
+            )
             return "Error: Model configuration issue. The model's prompt template is missing required fields (bosToken). Please check your LMStudio model configuration."
         raise
 

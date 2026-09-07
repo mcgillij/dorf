@@ -79,8 +79,7 @@ class Leveling(commands.Cog):
         logger.info("Initializing XP database")
         with sqlite3.connect(XP_DB) as conn:
             c = conn.cursor()
-            c.execute(
-                """
+            c.execute("""
                 CREATE TABLE IF NOT EXISTS user_xp (
                     user_id INTEGER PRIMARY KEY,
                     xp INTEGER DEFAULT 0,
@@ -88,8 +87,7 @@ class Leveling(commands.Cog):
                     prestige INTEGER DEFAULT 0,
                     last_message_ts REAL
                 )
-            """
-            )
+            """)
             conn.commit()
 
     async def check_and_assign_roles(self, member, new_level):

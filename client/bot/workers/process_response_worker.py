@@ -31,8 +31,14 @@ async def process_response_queue(queue_name, response_key_prefix, bot):
             unique_id = task["unique_id"]
             message = task["message"]
 
-            # Call get_response
-            response = await bot.llm.get_response(message)
+            # Call get_response. On LLM failure, still set the key (empty) so
+            # the waiting text command gets a prompt "no response" instead of
+            # polling until its timeout.
+            try:
+                response = await bot.llm.get_response(message)
+            except Exception as e:
+                logger.error(f"{queue_name}: LLM request failed: {e}")
+                response = ""
 
             # Store the response in Redis for retrieval
             await asyncio.to_thread(

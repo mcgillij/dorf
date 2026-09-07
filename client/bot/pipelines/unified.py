@@ -173,13 +173,23 @@ async def run_unified_response_pipeline(
     if final_for_voice != response_text:
         await send_text(send, final_for_voice)
 
+    spoken = final_for_voice if final_for_voice else response_text
     if human_in_voice_channel:
-        await enqueue_tts(
-            audio_queue_name=audio_queue_name,
-            unique_id=unique_id,
-            messages=[final_for_voice if final_for_voice else response_text],
-            ctx=ctx,
-        )
+        if spoken and spoken.strip():
+            await enqueue_tts(
+                audio_queue_name=audio_queue_name,
+                unique_id=unique_id,
+                messages=[spoken],
+                ctx=ctx,
+            )
+        else:
+            # An empty string used to reach kokoro and die there silently;
+            # skip it explicitly.
+            logger.info(
+                "pipeline.skip_tts_empty trace_id=%s unique_id=%s",
+                ctx.trace_id,
+                unique_id,
+            )
 
     logger.info(
         "pipeline.done trace_id=%s unique_id=%s response_len=%s elapsed_ms=%s",
@@ -219,10 +229,18 @@ async def deliver_existing_response(
     if final_for_voice != response_text:
         await send_text(send, final_for_voice)
 
+    spoken = final_for_voice if final_for_voice else response_text
     if human_in_voice_channel:
-        await enqueue_tts(
-            audio_queue_name=audio_queue_name,
-            unique_id=unique_id,
-            messages=[final_for_voice if final_for_voice else response_text],
-            ctx=ctx,
-        )
+        if spoken and spoken.strip():
+            await enqueue_tts(
+                audio_queue_name=audio_queue_name,
+                unique_id=unique_id,
+                messages=[spoken],
+                ctx=ctx,
+            )
+        else:
+            logger.info(
+                "pipeline.skip_tts_empty trace_id=%s unique_id=%s",
+                ctx.trace_id,
+                unique_id,
+            )

@@ -9,7 +9,6 @@ from bot.constants import INSULT_DB
 from bot.config import CHAT_CHANNEL_ID
 from bot.lms import qa_insult
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -24,16 +23,13 @@ class Insulter(commands.Cog):
     def _initialize_db(self):
         """Initialize the SQLite database with required tables."""
         cursor = self.db.cursor()
-        cursor.execute(
-            """
+        cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT NOT NULL
         )
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS scheduled_tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_name TEXT NOT NULL,
@@ -43,8 +39,7 @@ class Insulter(commands.Cog):
                 user_id INTEGER NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users (user_id)
         )
-        """
-        )
+        """)
         self.db.commit()
 
     async def cog_unload(self):
@@ -84,9 +79,7 @@ class Insulter(commands.Cog):
             )
             self.db.commit()
             logger.info("All running tasks have been reset to 'pending'.")
-            cursor.execute(
-                "SELECT id, status FROM scheduled_tasks"
-            )
+            cursor.execute("SELECT id, status FROM scheduled_tasks")
             all_tasks = cursor.fetchall()
             logger.debug(f"All tasks after reset: {all_tasks}")
         except Exception as e:

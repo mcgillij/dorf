@@ -1,0 +1,120 @@
+# Bootstrap / setup / run tasks for the dorf client stack.
+# Docs: docs/modernize_justfile_tasks.md
+
+set shell := ["bash", "-uc"]
+
+whisper_image := "ghcr.io/ggerganov/whisper.cpp:main"
+whisper_model := "models/ggml-base.en.bin"
+whisper_container := "derf-whisper"
+
+# List all tasks
+@default:
+    just --list
+
+# Install python dependencies into the poetry venv
+install:
+    poetry install
+
+# Reinstall the manually-managed TTS + torch stack. Poetry can't own these:
+# misaki >=0.7.15 still declares python <3.13, and letting pip resolve
+# kokoro's deps would downgrade numpy (breaking pandas) and pull a CUDA
+# torch. The venv shadows the pyenv system torch (which is currently a
+# corrupted half-upgraded 2.14-dev build) with a clean CPU build.
+tts-deps:
+    poetry run pip install --no-deps kokoro==0.7.16 misaki==0.7.4
+    poetry run pip install --ignore-installed torch --index-url https://download.pytorch.org/whl/cpu
+    poetry run pip install --no-deps --ignore-installed torchvision --index-url https://download.pytorch.org/whl/cpu
+    poetry run pip install regex num2words phonemizer-fork espeakng-loader spacy scipy transformers==4.48.0
+
+# Pull redis + whisper.cpp images
+pull:
+    docker compose pull redis
+    docker pull {{whisper_image}}
+
+# Start redis (persistent volume)
+redis-up:
+    docker compose up -d
+
+# Stop redis
+redis-down:
+    docker compose down
+
+# One-time: download the whisper model (~148MB) into ./models
+@model:
+    mkdir -p models
+    test -f {{whisper_model}} || \
+    docker run --rm -v "$PWD/models:/models" {{whisper_image}} \
+      /bin/sh -c "cd /app/models && ./download-ggml-model.sh base.en && cp ggml-base.en.bin /models/"
+
+# Start the whisper.cpp STT server on :8080 (ROCm), only if not already up
+@whisper-up:
+    if curl -s -o /dev/null --max-time 2 http://127.0.0.1:8080/; then \
+      echo "whisper server already listening on :8080"; exit 0; fi
+    docker rm -f {{whisper_container}} 2>/dev/null || true
+    docker run -d --name {{whisper_container}} --network=host \
+      --device=/dev/kfd --device=/dev/dri --group-add=video --ipc=host \
+      --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
+      -v "$PWD/models:/models" \
+      {{whisper_image}} \
+      /app/build/bin/whisper-server -m /models/ggml-base.en.bin
+
+# Stop the whisper.cpp server
+@whisper-down:
+    docker rm -f {{whisper_container}} 2>/dev/null || true
+
+# Run the whisper worker (STT queue consumer) in the foreground
+whisper-worker:
+    poetry run python whisper_worker.py
+
+# Run the bot in the foreground (dev; exactly one process)
+bot:
+    poetry run python derfbot.py
+
+# Run the bot with auto-restart on *.py changes (dev only; never with `up`)
+bot-watch:
+    poetry run watchmedo auto-restart -p "*.py" -R python -- derfbot.py
+
+# Start the full stack in the background: redis + whisper server + worker + bot
+up:
+    ./startup
+
+# Stop everything the stack started
+stop:
+    ./kill
+
+# Restart the full stack
+restart: stop && up
+    tail -f bot.log
+
+# Sanity check the stack: redis, whisper server, model file
+@check:
+    @echo -n "redis:     "; poetry run python -c "from bot.redis_client import redis_client; print('OK' if redis_client.ping() else 'FAIL')" 2>/dev/null || echo "FAIL"
+    @echo -n "whisper :  "; curl -s -o /dev/null --max-time 2 http://127.0.0.1:8080/ && echo "OK (:8080)" || echo "FAIL (:8080)"
+    @echo -n "model:     "; test -f {{whisper_model}} && echo "OK" || echo "MISSING (run: just model)"
+    @echo -n "bot proc:  "; pgrep -af "[d]erfbot.py" > /dev/null && echo "running" || echo "not running"
+    @echo -n "worker:    "; pgrep -af "[w]hisper_worker.py" > /dev/null && echo "running" || echo "not running"
+
+# Tail the bot log
+logs:
+    tail -f bot.log
+
+# Tail every stack log at once: redis + whisper server + STT worker + bot.
+# Container logs are mirrored to logs/ by `startup`/`up`.
+@up-logs:
+    mkdir -p logs
+    touch logs/redis.log logs/whisper_server.log
+    tail -F -n 15 logs/redis.log logs/whisper_server.log whisper_worker.nohup.log bot.log
+
+# Tail the docker-side logs only (redis + whisper server)
+@docker-logs:
+    mkdir -p logs
+    touch logs/redis.log logs/whisper_server.log
+    tail -F -n 15 logs/redis.log logs/whisper_server.log
+
+# Tail the background whisper worker log
+worker-logs:
+    tail -f whisper_worker.nohup.log
+
+# Tail the background bot nohup log
+bot-logs:
+    tail -f bot.nohup.log

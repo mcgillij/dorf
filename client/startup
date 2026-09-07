@@ -1,16 +1,39 @@
 #!/bin/bash
 # startup for dependencies
 
-#docker pull redis
-#docker pull ghcr.io/ggerganov/whisper.cpp:main
+cd "$(dirname "$0")"
 
+# Redis (docker compose: persistent volume + restart policy)
+docker compose up -d
 
-#docker run -d -p 6379:6379 redis
-#docker run -d -p 8080:8080 --network=host --device=/dev/kfd --device=/dev/dri --group-add=video --ipc=host --cap-add=SYS_PTRACE --security-opt seccomp=unconfined ghcr.io/ggerganov/whisper.cpp:main /app/build/bin/whisper-server -m /app/models/ggml-base.en.bin
+# Mirror container logs to files so `just up-logs` can tail everything with
+# one process. pgrep guards keep restarts from duplicating the followers.
+mkdir -p logs
+if ! pgrep -f "[c]ompose logs -f redis" > /dev/null; then
+  nohup docker compose logs -f --tail 20 redis >> logs/redis.log 2>&1 &
+fi
+if ! pgrep -f "[d]ocker logs -f.*derf-whisper" > /dev/null; then
+  nohup docker logs -f --tail 20 derf-whisper >> logs/whisper_server.log 2>&1 &
+fi
 
-#nohup poetry run python whisper_worker.py &
+# Whisper STT server (ROCm). Start only if nothing is already listening on 8080.
+# One-time model download into ./models:
+#   mkdir -p models
+#   docker run --rm -v "$PWD/models:/models" ghcr.io/ggerganov/whisper.cpp:main \
+#     /bin/sh -c "cd /app/models && ./download-ggml-model.sh base.en && cp ggml-base.en.bin /models/"
+if ! curl -s -o /dev/null --max-time 2 http://127.0.0.1:8080/; then
+  docker rm -f derf-whisper 2>/dev/null
+  docker run -d --name derf-whisper --network=host \
+    --device=/dev/kfd --device=/dev/dri --group-add=video --ipc=host \
+    --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
+    -v "$PWD/models:/models" \
+    ghcr.io/ggerganov/whisper.cpp:main \
+    /app/build/bin/whisper-server -m /models/ggml-base.en.bin
+fi
 
-nohup poetry run python derfbot.py &
-#python derfbot.py &
-#nohup poetry run watchmedo auto-restart -p "*.py" -R python -- derfbot.py &
-#docker run -d -p 6379:6379 redis
+# STT worker (consumes whisper_queue, routes transcripts to the bots)
+nohup poetry run python whisper_worker.py >> whisper_worker.nohup.log 2>&1 &
+
+# The bot — exactly ONE process. Do not also run watcher.sh: two processes
+# fight over the Discord token and tear each other's voice sinks down.
+nohup poetry run python derfbot.py >> bot.nohup.log 2>&1 &

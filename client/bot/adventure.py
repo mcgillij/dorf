@@ -12,8 +12,21 @@ class Adventure(commands.Cog):
     def __init__(self, bot):
         logger.info("ADVENTURE TIME!")
         self.bot = bot
-        self.model = lms.llm()
+        # Lazy-loaded: lms.llm() connects to LM Studio and blocks; doing it at
+        # cog-load time used to abort on_ready (and the whole voice pipeline)
+        # whenever LM Studio was down.
+        self._model = None
         self.active_quests = {}
+
+    @property
+    def model(self):
+        if self._model is None:
+            self._model = lms.llm()
+        return self._model
+
+    async def _respond(self, chat) -> str:
+        # lmstudio calls are blocking; run them off the shared event loop.
+        return await asyncio.to_thread(self.model.respond, chat)
 
     async def send_adventure_message(self, ctx, content, add_reactions=True):
         """Helper to send a message and optionally add reaction options."""
@@ -47,7 +60,7 @@ class Adventure(commands.Cog):
         chat.add_user_message("I want to go on an adventure!")
 
         # First prompt
-        prediction = self.model.respond(chat)
+        prediction = await self._respond(chat)
         message = await self.send_adventure_message(
             ctx, f"**Your quest begins!**\n\n{prediction}"
         )
@@ -127,7 +140,7 @@ class Adventure(commands.Cog):
                     )
 
                 # Get final story
-                final_story = self.model.respond(summary_chat)
+                final_story = await self._respond(summary_chat)
 
                 await ctx.send(end_text)
                 await ctx.send(final_story)
@@ -143,7 +156,7 @@ class Adventure(commands.Cog):
                 return  # End command here!
 
             # 🚀 Adventure still ongoing, continue
-            continuation = self.model.respond(chat)
+            continuation = await self._respond(chat)
 
             # Send next adventure message (with reactions)
             message = await self.send_adventure_message(

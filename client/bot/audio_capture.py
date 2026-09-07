@@ -5,71 +5,102 @@ import json
 import wave
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict
 import asyncio
 import logging
 import uuid
 
 from pydub import AudioSegment
-import discord
 from discord.ext.voice_recv import AudioSink, VoiceData
 from bot.redis_client import redis_client
 from bot.constants import WHISPER_QUEUE
 
 logger = logging.getLogger(__name__)
 
+# Capture flushes (WAV write + ffmpeg convert) get a dedicated executor so long
+# TTS/redis jobs on the default executor can't starve them and stall flushes.
+_FLUSH_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="capture-flush")
+
 
 class RingBuffer:
+    """Thread-safe circular byte buffer.
+
+    Invariant: unread bytes live at [read_ptr, read_ptr + available) (wrapping),
+    i.e. read_ptr == (write_ptr - available) % size at all times. Writes that
+    would overflow capacity discard the oldest unread bytes first, so reads are
+    always chronological.
+    """
+
     def __init__(self, size: int):
         self.buffer = bytearray(size)
         self.size = size
         self.write_ptr = 0
         self.read_ptr = 0
-        self.is_full = False
+        self.available = 0
         self.lock = threading.Lock()
 
     def write(self, data: bytes):
+        n = len(data)
         with self.lock:
-            data_len = len(data)
-            if data_len > self.size:
-                # If data exceeds buffer size, write only the last chunk
+            if n > self.size:
+                # Keep only the newest `size` bytes.
                 data = data[-self.size :]
-                data_len = len(data)
+                n = self.size
+            # Discard oldest unread bytes the write would overwrite.
+            discard = max(0, self.available + n - self.size)
+            self.available = self.available + n - discard
+            end = self.write_ptr + n
+            if end <= self.size:
+                self.buffer[self.write_ptr : end] = data
+            else:
+                first = self.size - self.write_ptr
+                self.buffer[self.write_ptr :] = data[:first]
+                self.buffer[: end - self.size] = data[first:]
+            self.write_ptr = end % self.size
+            self.read_ptr = (self.write_ptr - self.available) % self.size
 
-            # Write data in a circular manner
-            for byte in data:
-                self.buffer[self.write_ptr] = byte
-                self.write_ptr = (self.write_ptr + 1) % self.size
-                if self.is_full:
-                    self.read_ptr = (self.read_ptr + 1) % self.size
-                self.is_full = self.write_ptr == self.read_ptr
+    def _read_locked(self, reset_ptrs: bool) -> bytes:
+        if self.available == 0:
+            return b""
+        if self.read_ptr + self.available <= self.size:
+            data = bytes(self.buffer[self.read_ptr : self.read_ptr + self.available])
+        else:
+            first = self.size - self.read_ptr
+            data = bytes(self.buffer[self.read_ptr :]) + bytes(
+                self.buffer[: self.available - first]
+            )
+        if reset_ptrs:
+            self.read_ptr = 0
+            self.write_ptr = 0
+        else:
+            self.read_ptr = self.write_ptr
+        self.available = 0
+        return data
 
     def read_all(self) -> bytes:
+        """Read all unread bytes and mark them read."""
         with self.lock:
-            if not self.is_full and self.write_ptr == self.read_ptr:
-                # Buffer is empty
-                return b""
+            return self._read_locked(reset_ptrs=False)
 
-            if self.is_full:
-                # Read from the full buffer
-                data = self.buffer[self.read_ptr :] + self.buffer[: self.write_ptr]
-            else:
-                # Read from the used portion
-                data = self.buffer[self.read_ptr : self.write_ptr]
+    def drain(self) -> bytes:
+        """Atomically read everything and reset the buffer.
 
-            self.read_ptr = self.write_ptr  # Mark buffer as read
-            self.is_full = False
-            return bytes(data)
+        Audio written while a chunk is being converted lands in a fresh buffer
+        instead of being wiped by a post-conversion clear().
+        """
+        with self.lock:
+            return self._read_locked(reset_ptrs=True)
 
     def is_empty(self) -> bool:
         with self.lock:
-            return not self.is_full and self.write_ptr == self.read_ptr
+            return self.available == 0
 
     def clear(self):
         with self.lock:
             self.write_ptr = 0
             self.read_ptr = 0
-            self.is_full = False
+            self.available = 0
 
 
 class RingBufferAudioSink(AudioSink):
@@ -78,7 +109,7 @@ class RingBufferAudioSink(AudioSink):
         bot,
         buffer_size=1024 * 1024,
         output_dir="user_audio",
-        silence_seconds: float = 0.3,
+        silence_seconds: float = 0.5,
         max_chunk_seconds: float = 10.0,
     ):
         self.bot = bot  # Store bot instance for access to the loop
@@ -87,20 +118,18 @@ class RingBufferAudioSink(AudioSink):
         self.output_dir = output_dir
         self.silence_seconds = silence_seconds
         self.max_chunk_seconds = max_chunk_seconds
-        self.last_check_time = {}
         self.last_audio_time: Dict[int, float] = {}
         self.last_packet_time: float = 0.0
         self.chunk_start_time: Dict[int, float] = {}
         self.user_context: Dict[int, Dict[str, int]] = {}
         self.processing_locks: Dict[int, asyncio.Lock] = {}
         self.save_task = None
-        self.ssrc_to_user: Dict[int, int] = {}  # Map SSRC to user ID
         os.makedirs(self.output_dir, exist_ok=True)
         logger.info("RingBufferAudioSink initialized")
 
     def write(self, member, data: VoiceData):
         try:
-            current_time = time.time()
+            current_time = time.monotonic()
             self.last_packet_time = current_time
             # Never record bots (prevents bots recording each other / themselves).
             if member is not None and getattr(member, "bot", False):
@@ -126,7 +155,6 @@ class RingBufferAudioSink(AudioSink):
             if user_id not in self.ring_buffers:
                 logger.info(f"Creating new buffer for user {user_id}")
                 self.ring_buffers[user_id] = RingBuffer(self.buffer_size)
-                self.last_check_time[user_id] = current_time
                 self.chunk_start_time[user_id] = current_time
 
             self.ring_buffers[user_id].write(data.pcm)
@@ -145,7 +173,7 @@ class RingBufferAudioSink(AudioSink):
         """Background task to check for silence periods and save audio"""
         try:
             while True:
-                current_time = time.time()
+                current_time = time.monotonic()
                 for user_id, last_time in list(self.last_audio_time.items()):
                     silence_elapsed = current_time - last_time
                     chunk_elapsed = current_time - self.chunk_start_time.get(
@@ -157,18 +185,25 @@ class RingBufferAudioSink(AudioSink):
                         silence_elapsed > self.silence_seconds
                         or chunk_elapsed > self.max_chunk_seconds
                     ):
-                        if (
-                            user_id in self.ring_buffers
-                            and not self.ring_buffers[user_id].is_empty()
-                        ):
-                            # Only process if we're not already processing for this user
-                            if not self.processing_locks[user_id].locked():
-                                async with self.processing_locks[user_id]:
-                                    await self.bot.loop.run_in_executor(
-                                        None, self.save_user_audio, user_id
-                                    )
-                            del self.last_audio_time[user_id]
-                            self.chunk_start_time[user_id] = current_time
+                        lock = self.processing_locks.get(user_id)
+                        if lock is None or lock.locked():
+                            # A flush is already running for this user; retry
+                            # on the next tick instead of racing it.
+                            continue
+                        async with lock:
+                            await self.bot.loop.run_in_executor(
+                                _FLUSH_EXECUTOR, self.save_user_audio, user_id
+                            )
+                        # New chunks start from now, regardless of how long the
+                        # save took.
+                        self.chunk_start_time[user_id] = time.monotonic()
+                        # Only stop tracking the user when no audio arrived while
+                        # we were saving; otherwise their new packets are still
+                        # pending in a fresh buffer and must be flushed later.
+                        # (pop: the user may have left voice and been forgotten
+                        # while the save was running.)
+                        if self.last_audio_time.get(user_id) == last_time:
+                            self.last_audio_time.pop(user_id, None)
 
                 # If no active audio streams, end the task
                 if not self.last_audio_time:
@@ -178,6 +213,19 @@ class RingBufferAudioSink(AudioSink):
         except Exception as e:
             logger.error(f"Error in check_for_silence: {e}")
 
+    def forget_user(self, user_id) -> None:
+        """Drop all per-user state when a member leaves the voice channel.
+
+        Without this, every departed user leaks a full-size ring buffer and a
+        lock for the lifetime of the sink.
+        """
+        self.ring_buffers.pop(user_id, None)
+        self.processing_locks.pop(user_id, None)
+        self.user_context.pop(user_id, None)
+        self.last_audio_time.pop(user_id, None)
+        self.chunk_start_time.pop(user_id, None)
+        logger.info(f"Forgot capture state for user {user_id}")
+
     def save_user_audio(self, user_id):
         try:
             logger.info(f"Attempting to save audio for user {user_id}")
@@ -185,57 +233,51 @@ class RingBufferAudioSink(AudioSink):
             if not ring_buffer:
                 logger.info(f"No ring buffer found for user {user_id}")
                 return
-            pcm_data = ring_buffer.read_all()
-            if pcm_data:
-                logger.info(f"Got PCM data of length {len(pcm_data)}")
-                converted_path = save_audio(user_id, pcm_data, self.output_dir)
-                if not converted_path:
-                    logger.error("Failed to save/convert audio; skipping enqueue.")
-                    ring_buffer.clear()
-                    return
+            # Atomic drain: packets that arrive during the conversion below are
+            # written to a fresh buffer and survive for the next flush.
+            pcm_data = ring_buffer.drain()
+            if not pcm_data:
+                logger.info(f"No PCM data to save for user {user_id}")
+                return
+            logger.info(f"Got PCM data of length {len(pcm_data)}")
+            converted_path = save_audio(user_id, pcm_data, self.output_dir)
+            if not converted_path:
+                logger.error("Failed to save/convert audio; skipping enqueue.")
+                return
 
-                payload = {
-                    "user_id": user_id,
-                    "audio_path": converted_path,
-                    "trace_id": str(uuid.uuid4()),
-                }
-                payload.update(self.user_context.get(user_id, {}))
-                payload_json = json.dumps(payload)
-                try:
-                    new_len = redis_client.lpush(WHISPER_QUEUE, payload_json)
-                except Exception as e:
-                    logger.error(
-                        "whisper.enqueue_failed user_id=%s path=%s error=%s",
-                        user_id,
-                        converted_path,
-                        e,
-                    )
-                    ring_buffer.clear()
-                    return
-
-                logger.info(
-                    "whisper.enqueue_ok user_id=%s trace_id=%s guild_id=%s channel_id=%s queue=%s new_len=%s payload_bytes=%s path=%s",
+            payload = {
+                "user_id": user_id,
+                "audio_path": converted_path,
+                "trace_id": str(uuid.uuid4()),
+            }
+            payload.update(self.user_context.get(user_id, {}))
+            payload_json = json.dumps(payload)
+            try:
+                new_len = redis_client.lpush(WHISPER_QUEUE, payload_json)
+            except Exception as e:
+                logger.error(
+                    "whisper.enqueue_failed user_id=%s path=%s error=%s",
                     user_id,
-                    payload.get("trace_id"),
-                    payload.get("guild_id"),
-                    payload.get("channel_id"),
-                    WHISPER_QUEUE,
-                    new_len,
-                    len(payload_json.encode("utf-8")),
                     converted_path,
+                    e,
                 )
+                return
 
-                logger.info(f"Saved audio to {converted_path}")
-            else:
-                logger.error("No PCM data to save")
-            ring_buffer.clear()
+            logger.info(
+                "whisper.enqueue_ok user_id=%s trace_id=%s guild_id=%s channel_id=%s queue=%s new_len=%s payload_bytes=%s path=%s",
+                user_id,
+                payload.get("trace_id"),
+                payload.get("guild_id"),
+                payload.get("channel_id"),
+                WHISPER_QUEUE,
+                new_len,
+                len(payload_json.encode("utf-8")),
+                converted_path,
+            )
+
+            logger.info(f"Saved audio to {converted_path}")
         except Exception as e:
             logger.error(f"Error in save_user_audio: {e}")
-
-    def save(self):
-        logger.info("Manual save triggered")
-        for user_id in list(self.ring_buffers.keys()):
-            self.save_user_audio(user_id)
 
     def cleanup(self):
         pass
@@ -326,10 +368,3 @@ def save_audio(user_id: int, pcm_data, output_dir: str) -> str:
     except Exception as e:
         logger.exception(f"Error in save_audio: {e}")
         return None
-
-
-class VoiceRecvClient(discord.VoiceProtocol):
-    def __init__(self, client: discord.Client, channel: discord.abc.Connectable):
-        logger.info("VoiceRecvClient init")
-        super().__init__(client, channel)
-        self.audio_sink = None

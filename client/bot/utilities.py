@@ -1,10 +1,10 @@
 import re
 import os
+import uuid
 from random import randint, choice
 import aiohttp
 import asyncio
 import traceback
-import hashlib
 import logging
 import time
 
@@ -15,20 +15,28 @@ from bot.config import LLM_HOST
 from bot.constants import FILTERED_KEYWORDS
 from bot.audio_capture import RingBufferAudioSink
 
-timeout = aiohttp.ClientTimeout(total=120)
+timeout = aiohttp.ClientTimeout(total=int(os.getenv("LLM_TIMEOUT_S", "60")))
+
+
+class LLMRequestError(Exception):
+    """The LLM backend failed after retries (timeout/unreachable/error status)."""
+
 
 logger = logging.getLogger(__name__)
 
 
 def patch_voice_recv_opus_decoder() -> None:
-    """Best-effort runtime patch for discord-ext-voice-recv.
+    """Runtime patches for discord-ext-voice-recv.
 
-    The upstream library can raise `discord.opus.OpusError: corrupted stream` while decoding.
-    That exception can crash the PacketRouter thread, which then stops delivery of audio and
-    forces reconnect churn.
-
-    This patch makes Opus decode failures drop the offending packet and recreate the decoder
-    instance, allowing capture to continue.
+    1. Opus decode failures must never kill the PacketRouter thread ("corrupted
+       stream" would stop all audio delivery) — drop the packet and reset.
+    2. Discord voice is end-to-end encrypted with DAVE (MLS). Calls do NOT
+       downgrade when a non-DAVE receiver (this bot) is present, so after
+       transport decryption every real voice frame is still MLS ciphertext and
+       opus decode fails on ~all of them. davey (shipped with
+       discord.py[voice]) already maintains the DaveSession for sending; this
+       patch reuses it to decrypt inbound frames per sender, mirroring the
+       upstream PR (imayhaveborkedit/discord-ext-voice-recv#58).
     """
 
     try:
@@ -36,78 +44,155 @@ def patch_voice_recv_opus_decoder() -> None:
     except Exception:
         return
 
-    if getattr(vr_opus, "_DERF_PATCHED_OPUS", False):
+    if not getattr(vr_opus, "_DERF_PATCHED_OPUS", False):
+        patched_any = False
+
+        # Newer discord-ext-voice-recv versions use PacketDecoder.
+        PacketDecoder = getattr(vr_opus, "PacketDecoder", None)
+        if PacketDecoder is not None:
+            try:
+                original_pop_data = PacketDecoder.pop_data
+
+                def pop_data_safe(self, *args, **kwargs):
+                    try:
+                        return original_pop_data(self, *args, **kwargs)
+                    except discord.opus.OpusError as e:
+                        # Important: do not let this escape, or PacketRouter thread dies.
+                        logger.warning("voice_recv OpusError (dropping packet): %s", e)
+                        try:
+                            self.reset()
+                        except Exception:
+                            pass
+                        return None
+
+                PacketDecoder.pop_data = pop_data_safe
+                patched_any = True
+            except Exception:
+                pass
+
+            # Extra safety: patch _decode_packet too (some versions may call it in other contexts).
+            try:
+                original_decode_packet = PacketDecoder._decode_packet
+
+                def decode_packet_safe(self, packet):
+                    try:
+                        return original_decode_packet(self, packet)
+                    except discord.opus.OpusError as e:
+                        logger.warning(
+                            "voice_recv OpusError in _decode_packet (dropping): %s", e
+                        )
+                        try:
+                            # Recreate decoder to reset state.
+                            self._decoder = vr_opus.Decoder()
+                        except Exception:
+                            pass
+                        return packet, b""
+
+                PacketDecoder._decode_packet = decode_packet_safe
+                patched_any = True
+            except Exception:
+                pass
+
+        # Backward compatibility: older versions used OpusDecoder.
+        OpusDecoder = getattr(vr_opus, "OpusDecoder", None)
+        if OpusDecoder is not None:
+            try:
+                original_decode_packet = OpusDecoder._decode_packet
+
+                def _decode_packet_safe(self, packet):
+                    try:
+                        return original_decode_packet(self, packet)
+                    except discord.opus.OpusError as e:
+                        logger.warning("voice_recv OpusError (dropping packet): %s", e)
+                        try:
+                            self._decoder = vr_opus.Decoder()
+                        except Exception:
+                            pass
+                        return packet, b""
+
+                OpusDecoder._decode_packet = _decode_packet_safe
+                patched_any = True
+            except Exception:
+                pass
+
+        vr_opus._DERF_PATCHED_OPUS = bool(patched_any)
+
+    if not getattr(vr_opus, "_DERF_PATCHED_DAVE", False):
+        _patch_voice_recv_dave(vr_opus)
+
+
+def _patch_voice_recv_dave(vr_opus) -> None:
+    """Decrypt DAVE (E2EE / MLS) frames on the receive path.
+
+    After Discord's DAVE rollout the transport-decrypted payload is still
+    MLS ciphertext for every real voice frame; without this patch opus decode
+    fails with 'corrupted stream' on essentially all of them (only unencrypted
+    silence/keepalive frames decode, which is why capture appeared to work in
+    brief stretches).
+    """
+    try:
+        import davey
+    except ImportError:
+        logger.info("davey not installed; skipping DAVE decrypt patch.")
         return
 
-    patched_any = False
-
-    # Newer discord-ext-voice-recv versions use PacketDecoder.
     PacketDecoder = getattr(vr_opus, "PacketDecoder", None)
-    if PacketDecoder is not None:
+    if PacketDecoder is None:
+        return
+
+    def _dave_decrypt(self, packet) -> None:
+        data = getattr(packet, "decrypted_data", None)
+        if not packet or not data:
+            return
+
+        state = getattr(self.sink.voice_client, "_connection", None)
+        session = getattr(state, "dave_session", None)
+        if (
+            session is None
+            or not session.ready
+            or getattr(state, "dave_protocol_version", 0) == 0
+        ):
+            return
+
+        user_id = self._cached_id
+        if user_id is None:
+            # SSRC not mapped to a user yet — without the sender we cannot
+            # pick the right ratchet; leave the frame for normal handling.
+            return
+
         try:
-            original_pop_data = PacketDecoder.pop_data
+            packet.decrypted_data = session.decrypt(
+                int(user_id), davey.MediaType.audio, bytes(data)
+            )
+        except Exception as e:
+            # Expected for passthrough (unencrypted) frames; anything else is
+            # still better decoded-or-dropped than crashing the router.
+            logger.debug("DAVE decrypt failed for ssrc %s: %s", self.ssrc, e)
 
-            def pop_data_safe(self, *args, **kwargs):
-                try:
-                    return original_pop_data(self, *args, **kwargs)
-                except discord.opus.OpusError as e:
-                    # Important: do not let this escape, or PacketRouter thread dies.
-                    logger.warning("voice_recv OpusError (dropping packet): %s", e)
-                    try:
-                        self.reset()
-                    except Exception:
-                        pass
-                    return None
+    def _process_packet_with_dave(self, packet):
+        # Resolve the sender FIRST: DAVE decryption needs the user id to pick
+        # the right ratchet, and the stock implementation decodes before the
+        # SSRC is ever mapped to a user.
+        member = self._get_cached_member()
+        if member is None:
+            self._cached_id = self.sink.voice_client._get_id_from_ssrc(self.ssrc)
+            member = self._get_cached_member()
 
-            PacketDecoder.pop_data = pop_data_safe
-            patched_any = True
-        except Exception:
-            pass
+        self._dave_decrypt(packet)
 
-        # Extra safety: patch _decode_packet too (some versions may call it in other contexts).
-        try:
-            original_decode_packet = PacketDecoder._decode_packet
+        pcm = None
+        if not self.sink.wants_opus():
+            packet, pcm = self._decode_packet(packet)
 
-            def decode_packet_safe(self, packet):
-                try:
-                    return original_decode_packet(self, packet)
-                except discord.opus.OpusError as e:
-                    logger.warning("voice_recv OpusError in _decode_packet (dropping): %s", e)
-                    try:
-                        # Recreate decoder to reset state.
-                        self._decoder = vr_opus.Decoder()
-                    except Exception:
-                        pass
-                    return packet, b""
+        data = vr_opus.VoiceData(packet, member, pcm=pcm)
+        self._last_seq = packet.sequence
+        self._last_ts = packet.timestamp
+        return data
 
-            PacketDecoder._decode_packet = decode_packet_safe
-            patched_any = True
-        except Exception:
-            pass
-
-    # Backward compatibility: older versions used OpusDecoder.
-    OpusDecoder = getattr(vr_opus, "OpusDecoder", None)
-    if OpusDecoder is not None:
-        try:
-            original_decode_packet = OpusDecoder._decode_packet
-
-            def _decode_packet_safe(self, packet):
-                try:
-                    return original_decode_packet(self, packet)
-                except discord.opus.OpusError as e:
-                    logger.warning("voice_recv OpusError (dropping packet): %s", e)
-                    try:
-                        self._decoder = vr_opus.Decoder()
-                    except Exception:
-                        pass
-                    return packet, b""
-
-            OpusDecoder._decode_packet = _decode_packet_safe
-            patched_any = True
-        except Exception:
-            pass
-
-    vr_opus._DERF_PATCHED_OPUS = bool(patched_any)
+    PacketDecoder._dave_decrypt = _dave_decrypt
+    PacketDecoder._process_packet = _process_packet_with_dave
+    vr_opus._DERF_PATCHED_DAVE = True
+    logger.info("Patched voice_recv with DAVE (E2EE) receive decryption.")
 
 
 def get_random_image_path(directory):
@@ -189,6 +274,7 @@ async def preprocess_mentions(ctx, message: str) -> tuple[str, dict]:
     Returns: (processed_message, mention_map)
     """
     import re
+
     mention_map = {}
     placeholder_counter = 1
 
@@ -196,15 +282,15 @@ async def preprocess_mentions(ctx, message: str) -> tuple[str, dict]:
         nonlocal placeholder_counter
         user_id = match.group(1)
         placeholder = f"{{{{user{placeholder_counter}}}}}"  # e.g., {{user1}}
-        
+
         # Store original mention
         mention_map[placeholder] = f"<@{user_id}>"
-        
+
         placeholder_counter += 1
         return placeholder
 
     # Regex for user mentions (supports <@user_id> and <@!user_id>)
-    processed_message = re.sub(r'<@!?(\d+)>', replace_mention, message)
+    processed_message = re.sub(r"<@!?(\d+)>", replace_mention, message)
     return processed_message, mention_map
 
 
@@ -216,9 +302,10 @@ async def postprocess_mentions(ctx, response: str, mention_map: dict) -> str:
     # First, replace placeholders
     for placeholder, mention in mention_map.items():
         response = response.replace(placeholder, mention)
-    
+
     # Then, replace any @IDs that are in the map
     import re
+
     def replace_id(match):
         user_id = match.group(1)
         mention = f"<@{user_id}>"
@@ -227,8 +314,8 @@ async def postprocess_mentions(ctx, response: str, mention_map: dict) -> str:
             if m == mention:
                 return mention
         return match.group(0)  # Leave as is if not in map
-    
-    response = re.sub(r'@(\d+)', replace_id, response)
+
+    response = re.sub(r"@(\d+)", replace_id, response)
     return response
 
 
@@ -237,10 +324,13 @@ def filter_message(message: str) -> bool:
 
 
 def generate_unique_id(ctx, message: str) -> str:
-    """Generates a unique ID based on context and message."""
-    return hashlib.md5(
-        f"{ctx.guild.id}^{ctx.channel.id}^{ctx.author.id}^{message}".encode()
-    ).hexdigest()
+    """Generates a unique ID for a text-command request.
+
+    Previously this was an md5 of context+message, which collided whenever the
+    same user sent the same message twice; identical IDs then shared the same
+    response key and mention map. uuid4 has no such collision.
+    """
+    return uuid.uuid4().hex
 
 
 async def poll_redis_for_key(key: str, timeout: float = 0.5) -> str:
@@ -333,6 +423,11 @@ class LLMClient:
                 return ""
 
     async def get_response(self, message: str) -> str:
+        """Ask the LLM workspace for a response.
+
+        Retries once, then raises LLMRequestError so callers can requeue/dead-
+        letter the request instead of speaking an error message aloud.
+        """
         url = f"http://{LLM_HOST}/api/v1/workspace/{self.workspace}/chat"
         headers = {
             "accept": "application/json",
@@ -345,24 +440,39 @@ class LLMClient:
             "sessionId": self.session_id,
             "attachments": [],
         }
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+
+        attempts = 2
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
             try:
-                async with session.post(url, headers=headers, json=data) as response:
-                    if response.status == 200:
-                        json_response = await response.json()
-                        return json_response.get("textResponse", "")
-                    else:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.post(
+                        url, headers=headers, json=data
+                    ) as response:
+                        if response.status == 200:
+                            json_response = await response.json()
+                            return json_response.get("textResponse", "") or ""
+                        body = await response.text()
                         logger.error(
-                            f"Error: {response.status} - {await response.text()}"
+                            "llm.error attempt=%s status=%s body=%s",
+                            attempt,
+                            response.status,
+                            (body[:500] + "…") if len(body) > 500 else body,
                         )
-                        return ""
+                        last_error = LLMRequestError(f"status {response.status}")
             except asyncio.TimeoutError:
-                logger.error("Request timed out.")
-                return "The request timed out. Please try again later."
+                logger.error("llm.timeout attempt=%s", attempt)
+                last_error = LLMRequestError("timeout")
+            except LLMRequestError:
+                raise
             except Exception as e:
-                logger.error(f"Exception during API call: {e}")
-                traceback.print_exc()
-                return "An error occurred while processing the request. Please try again later."
+                logger.error("llm.exception attempt=%s error=%s", attempt, e)
+                last_error = LLMRequestError(str(e))
+
+            if attempt < attempts:
+                await asyncio.sleep(1.0)
+
+        raise last_error or LLMRequestError("unknown error")
 
 
 def split_text(text):  # This shouldn't be needed anymore since moving mostly to kokoro
@@ -384,14 +494,31 @@ async def start_capture(guild, channel, bot, *, force_restart: bool = False):
         async with capture_lock:
             # Prefer an existing VoiceClient from bot.voice_clients (it can exist while
             # guild.voice_client is still None during the handshake).
-            vc = next((v for v in bot.voice_clients if v.guild == guild), None) or guild.voice_client
+            vc = (
+                next((v for v in bot.voice_clients if v.guild == guild), None)
+                or guild.voice_client
+            )
+
+            if vc is not None and not vc.is_connected():
+                # Wait briefly for an in-flight connect before treating it as a zombie.
+                deadline = time.time() + 10.0
+                while not vc.is_connected() and time.time() < deadline:
+                    await asyncio.sleep(0.25)
+                if not vc.is_connected():
+                    # A dead client left in place would make later connect attempts
+                    # believe we are already connected; tear it down and reconnect.
+                    logger.warning(
+                        "Stale/disconnected voice client; cleaning up and reconnecting."
+                    )
+                    try:
+                        await vc.disconnect(force=True)
+                    except Exception:
+                        pass
+                    vc = None
 
             if vc is None:
                 logger.info("Not connected yet. Connecting to voice...")
                 vc = await channel.connect(cls=VoiceRecvClient)
-
-            # If a connect is in-flight, wait briefly rather than issuing a second connect.
-            if vc is not None and not vc.is_connected():
                 deadline = time.time() + 10.0
                 while not vc.is_connected() and time.time() < deadline:
                     await asyncio.sleep(0.25)
@@ -413,7 +540,14 @@ async def start_capture(guild, channel, bot, *, force_restart: bool = False):
                 except Exception:
                     pass
 
-            ring_buffer_sink = RingBufferAudioSink(bot=bot, buffer_size=1024 * 1024)
+            # 48kHz stereo s16le is ~192 KB/s; the buffer must hold a full
+            # max_chunk_seconds (10s ≈ 1.92 MB) without overwriting its own
+            # start. 4 MiB ≈ 22s of headroom.
+            ring_buffer_sink = RingBufferAudioSink(
+                bot=bot,
+                buffer_size=4 * 1024 * 1024,
+                output_dir=os.getenv("USER_AUDIO_DIR", "user_audio"),
+            )
             # Initialize timestamps so watchdog doesn't treat a fresh sink as "ancient".
             ring_buffer_sink.last_packet_time = time.time()
 
@@ -478,6 +612,18 @@ async def connect_to_voice(bot, *, force_reconnect: bool = False):
                     pass
                 current_vc = None
 
+            # A client that lingers after a failed handshake would make the checks
+            # below believe we are connected; drop it and start fresh.
+            if current_vc and not current_vc.is_connected():
+                logger.warning(
+                    "Existing voice client is disconnected; cleaning up and reconnecting."
+                )
+                try:
+                    await current_vc.disconnect(force=True)
+                except Exception:
+                    pass
+                current_vc = None
+
             if not current_vc:
                 await voice_channel.connect(cls=VoiceRecvClient)
                 logger.info(f"Connected to {voice_channel.name}")
@@ -491,10 +637,8 @@ async def connect_to_voice(bot, *, force_reconnect: bool = False):
                     await current_vc.disconnect(force=True)
                     await voice_channel.connect(cls=VoiceRecvClient)
                     logger.info(f"Reconnected to {voice_channel.name}")
-                    return
-
                 # Check if already connected to the correct channel
-                if current_vc.channel and current_vc.channel.id != voice_channel.id:
+                elif current_vc.channel and current_vc.channel.id != voice_channel.id:
                     # Move existing client or reconnect?
                     try:
                         await current_vc.move_to(voice_channel)  # Attempt move first
@@ -505,21 +649,21 @@ async def connect_to_voice(bot, *, force_reconnect: bool = False):
                         await voice_channel.connect(cls=VoiceRecvClient)
                 else:
                     logger.debug("Already connected to the correct channel.")
+
+            # Every reconnect path must end with a live listener, otherwise the bot
+            # stays connected but deaf until a human re-joins the channel.
+            await start_capture(guild, voice_channel, bot)
         except Exception as e:
             logger.exception(f"Connection error: {str(e)}")
 
 
-async def voice_capture_watchdog(
-    bot,
-    *,
-    check_interval_seconds: float = 10.0,
-    stale_seconds: float = 20.0,
-):
+async def voice_capture_watchdog(bot, *, check_interval_seconds: float = 10.0):
     """Best-effort watchdog.
 
     If discord.ext.voice_recv hits an internal Opus decode failure (e.g. "corrupted stream"),
     the packet router thread can die and capture can silently stop. This watchdog detects
-    stale audio delivery and forces a reconnect + sink restart.
+    stale audio delivery and forces a reconnect + sink restart. It also revives dead
+    connections and dead listeners while humans are present.
     """
 
     while True:
@@ -543,16 +687,31 @@ async def voice_capture_watchdog(
             if not isinstance(channel, discord.VoiceChannel):
                 continue
 
-            vc = guild.voice_client
-            if not vc or not vc.is_connected():
-                continue
-
-            if not vc.is_listening():
-                continue
-
             # If there are no humans, don't churn connections.
             has_humans = any(not m.bot for m in channel.members)
             if not has_humans:
+                continue
+
+            vc = (
+                next((v for v in bot.voice_clients if v.guild == guild), None)
+                or guild.voice_client
+            )
+
+            # Rescue missing/disconnected clients: previously the watchdog only
+            # checked listener thread health, so a dead connection or a listener
+            # killed by voice_client.stop() stayed dead until a human re-joined.
+            if vc is None or not vc.is_connected():
+                logger.warning(
+                    "voice_capture_watchdog: no connected voice client while humans present; reconnecting."
+                )
+                await connect_to_voice(bot)
+                continue
+
+            if not vc.is_listening():
+                logger.warning(
+                    "voice_capture_watchdog: connected but not listening; restarting capture."
+                )
+                await start_capture(guild, channel, bot)
                 continue
 
             sink = getattr(bot, "voice_capture_sink", None)
@@ -569,7 +728,11 @@ async def voice_capture_watchdog(
             dead_parts: list[str] = []
             for name in ("packet_router", "event_router", "keepalive"):
                 part = getattr(reader, name, None)
-                if part is not None and hasattr(part, "is_alive") and not part.is_alive():
+                if (
+                    part is not None
+                    and hasattr(part, "is_alive")
+                    and not part.is_alive()
+                ):
                     dead_parts.append(name)
 
             reader_error = getattr(reader, "error", None)
@@ -589,7 +752,6 @@ async def voice_capture_watchdog(
                     dead_parts,
                 )
                 await connect_to_voice(bot, force_reconnect=True)
-                await start_capture(guild, channel, bot, force_restart=True)
 
         except Exception as e:
             logger.exception(f"voice_capture_watchdog error: {e}")

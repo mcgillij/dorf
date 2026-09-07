@@ -3,7 +3,7 @@ import re
 import json
 import time
 import wave
-from random import randint
+import uuid
 import logging
 import asyncio
 import aiohttp
@@ -15,10 +15,22 @@ from bot.constants import (
     WHISPER_DEAD_QUEUE,
     VOICE_RESPONSE_QUEUE,
     VOICE_NIC_RESPONSE_QUEUE,
-    VOICE_CONTROL_QUEUE,
+    VOICE_CONTROL_DERF_QUEUE,
+    VOICE_CONTROL_NIC_QUEUE,
 )
 
 logger = logging.getLogger(__name__)
+
+# Atomically move a job from the inflight list back onto the main queue,
+# replacing it with an updated payload (bumped attempt counter). Doing
+# LPUSH+LREM separately left a duplicated job in both lists if the worker
+# died between the two calls.
+_RETRY_MOVE_LUA = """
+if redis.call('LREM', KEYS[1], 1, ARGV[1]) == 1 then
+  return redis.call('LPUSH', KEYS[2], ARGV[2])
+end
+return 0
+"""
 
 
 def _ensure_logging_configured() -> None:
@@ -52,7 +64,9 @@ class WhisperClient:
         self._session = session
         self._url = url
 
-    async def get_text(self, audio_file_path: str, *, trace_id: str | None = None) -> str:
+    async def get_text(
+        self, audio_file_path: str, *, trace_id: str | None = None
+    ) -> str:
         url = self._url
         headers = {
             "accept": "application/json",
@@ -67,7 +81,9 @@ class WhisperClient:
                     filename=os.path.basename(audio_file_path),
                     content_type="audio/wav",
                 )
-                async with self._session.post(url, headers=headers, data=form) as response:
+                async with self._session.post(
+                    url, headers=headers, data=form
+                ) as response:
                     elapsed_ms = int((time.perf_counter() - started) * 1000)
                     if response.status == 200:
                         json_response = await response.json()
@@ -125,6 +141,27 @@ class WhisperWorker:
         self._whisper_url = os.getenv("WHISPER_URL", "http://127.0.0.1:8080/inference")
         self._max_attempts = int(os.getenv("WHISPER_MAX_ATTEMPTS", "5"))
         self._retry_backoff_s = float(os.getenv("WHISPER_RETRY_BACKOFF_S", "1.0"))
+        # How long a follow-up stays with the bot that answered the last
+        # wake-word turn, without needing the wake word again.
+        self._session_ttl_s = int(os.getenv("VOICE_SESSION_TTL_S", "60"))
+
+    async def _requeue_stranded_inflight(self) -> int:
+        """Move jobs stranded in the inflight list back to the main queue.
+
+        Jobs land in inflight via BRPOPLPUSH; if a previous worker crashed
+        mid-job they used to stay there forever with no reaper.
+        """
+        moved = 0
+        while True:
+            raw = await asyncio.to_thread(
+                redis_client.rpoplpush, WHISPER_INFLIGHT_QUEUE, WHISPER_QUEUE
+            )
+            if not raw:
+                break
+            moved += 1
+        if moved:
+            logger.warning("whisper.inflight_requeued moved=%s", moved)
+        return moved
 
     async def process_audio(self):
         """Process audio paths from the Redis queue."""
@@ -133,6 +170,7 @@ class WhisperWorker:
         logger.info("Connecting to Redis")
         if not await asyncio.to_thread(redis_client.ping):
             raise ConnectionError("Failed to connect to Redis.")
+        await self._requeue_stranded_inflight()
         try:
             qlen = await asyncio.to_thread(redis_client.llen, WHISPER_QUEUE)
         except Exception:
@@ -167,12 +205,18 @@ class WhisperWorker:
                         # Heartbeat: show queue length periodically when idle.
                         if now - last_idle_log >= 30.0:
                             try:
-                                qlen = await asyncio.to_thread(redis_client.llen, WHISPER_QUEUE)
-                                inflight_len = await asyncio.to_thread(redis_client.llen, WHISPER_INFLIGHT_QUEUE)
+                                qlen = await asyncio.to_thread(
+                                    redis_client.llen, WHISPER_QUEUE
+                                )
+                                inflight_len = await asyncio.to_thread(
+                                    redis_client.llen, WHISPER_INFLIGHT_QUEUE
+                                )
                             except Exception:
                                 qlen = "?"
                                 inflight_len = "?"
-                            idle_for = int(now - last_job_time) if last_job_time else None
+                            idle_for = (
+                                int(now - last_job_time) if last_job_time else None
+                            )
                             logger.info(
                                 "whisper.idle queue=%s len=%s inflight_len=%s idle_for_s=%s",
                                 WHISPER_QUEUE,
@@ -196,9 +240,19 @@ class WhisperWorker:
                     try:
                         path_info = json.loads(raw_value)
                     except json.JSONDecodeError as e:
-                        logger.warning("whisper.bad_json error=%s raw=%s", e, (raw_value[:500] + "…") if len(raw_value) > 500 else raw_value)
+                        logger.warning(
+                            "whisper.bad_json error=%s raw=%s",
+                            e,
+                            (
+                                (raw_value[:500] + "…")
+                                if len(raw_value) > 500
+                                else raw_value
+                            ),
+                        )
                         # Drop poison pill from inflight.
-                        await asyncio.to_thread(redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value)
+                        await asyncio.to_thread(
+                            redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value
+                        )
                         continue
 
                     user_id = path_info.get("user_id")
@@ -209,13 +263,19 @@ class WhisperWorker:
                     attempt = int(path_info.get("attempt", 1) or 1)
 
                     if not user_id or not audio_path:
-                        logger.info("No valid user_id or audio_path in the received data.")
-                        await asyncio.to_thread(redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value)
+                        logger.info(
+                            "No valid user_id or audio_path in the received data."
+                        )
+                        await asyncio.to_thread(
+                            redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value
+                        )
                         continue
 
                     exists = os.path.exists(audio_path)
                     size_bytes = os.path.getsize(audio_path) if exists else 0
-                    wav_meta = await asyncio.to_thread(_wav_info, audio_path) if exists else {}
+                    wav_meta = (
+                        await asyncio.to_thread(_wav_info, audio_path) if exists else {}
+                    )
 
                     logger.info(
                         "whisper.job trace_id=%s user_id=%s guild_id=%s channel_id=%s path=%s exists=%s size_bytes=%s wav=%s",
@@ -230,11 +290,19 @@ class WhisperWorker:
                     )
 
                     if not exists:
-                        logger.warning("whisper.missing_audio trace_id=%s path=%s", trace_id, audio_path)
-                        await asyncio.to_thread(redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value)
+                        logger.warning(
+                            "whisper.missing_audio trace_id=%s path=%s",
+                            trace_id,
+                            audio_path,
+                        )
+                        await asyncio.to_thread(
+                            redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value
+                        )
                         continue
 
-                    text_response = await whisper_client.get_text(audio_path, trace_id=trace_id)
+                    text_response = await whisper_client.get_text(
+                        audio_path, trace_id=trace_id
+                    )
                     if not text_response:
                         logger.info(
                             "whisper.empty_response trace_id=%s attempt=%s max_attempts=%s",
@@ -246,20 +314,41 @@ class WhisperWorker:
                         if attempt < self._max_attempts:
                             path_info["attempt"] = attempt + 1
                             path_info["last_error"] = "empty_response"
-                            await asyncio.to_thread(redis_client.lpush, WHISPER_QUEUE, json.dumps(path_info))
-                            await asyncio.to_thread(redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value)
+                            # Atomically move inflight → queue so a crash
+                            # between the two steps can't duplicate the job.
+                            # ARGV[1] is the original payload to remove,
+                            # ARGV[2] the updated one to push.
+                            await asyncio.to_thread(
+                                redis_client.eval,
+                                _RETRY_MOVE_LUA,
+                                2,
+                                WHISPER_INFLIGHT_QUEUE,
+                                WHISPER_QUEUE,
+                                raw_value,
+                                json.dumps(path_info),
+                            )
                             await asyncio.sleep(self._retry_backoff_s)
                             continue
 
                         # Dead-letter after max retries; keep audio on disk for postmortem.
                         path_info["attempt"] = attempt
                         path_info["dead_reason"] = "empty_response"
-                        await asyncio.to_thread(redis_client.lpush, WHISPER_DEAD_QUEUE, json.dumps(path_info))
-                        await asyncio.to_thread(redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value)
+                        await asyncio.to_thread(
+                            redis_client.lpush,
+                            WHISPER_DEAD_QUEUE,
+                            json.dumps(path_info),
+                        )
+                        await asyncio.to_thread(
+                            redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value
+                        )
                         continue
 
                     text_response = text_response.strip()
-                    preview = (text_response[:200] + "…") if len(text_response) > 200 else text_response
+                    preview = (
+                        (text_response[:200] + "…")
+                        if len(text_response) > 200
+                        else text_response
+                    )
                     logger.info(
                         "whisper.transcript trace_id=%s text_len=%s preview=%s",
                         trace_id,
@@ -267,30 +356,72 @@ class WhisperWorker:
                         preview,
                     )
 
-                    # Voice control: allow users to stop ongoing speech.
-                    # If no bot name is specified, treat as "stop all".
-                    if stop_pattern.search(text_response):
-                        target = "all"
-                        if nic_bot_name_pattern.search(text_response):
-                            target = "nic"
-                        elif bot_name_pattern.search(text_response):
-                            target = "derf"
+                    # Route by wake word first. A transcript must be addressed to a
+                    # bot before anything else (including stop commands) happens.
+                    if bot_name_pattern.search(text_response):
+                        routed = "derf"
+                    elif nic_bot_name_pattern.search(text_response):
+                        routed = "nic"
+                    else:
+                        # Session continuation: follow-ups addressed to nobody keep
+                        # going to the bot that answered the previous wake-word turn.
+                        routed = await asyncio.to_thread(
+                            redis_client.get, f"voice_session:{user_id}"
+                        )
+                        if routed not in ("derf", "nic"):
+                            logger.info(
+                                "whisper.unrouted trace_id=%s reason=no_bot_name preview=%s",
+                                trace_id,
+                                preview,
+                            )
+                            # Keep audio file if we didn't route it.
+                            await asyncio.to_thread(
+                                redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value
+                            )
+                            continue
+                        logger.info(
+                            "whisper.session_continue trace_id=%s user_id=%s bot=%s",
+                            trace_id,
+                            user_id,
+                            routed,
+                        )
 
+                    # Start/refresh the conversation session either way, so the
+                    # next nameless follow-up keeps talking to the same bot.
+                    await asyncio.to_thread(
+                        redis_client.set,
+                        f"voice_session:{user_id}",
+                        routed,
+                        ex=self._session_ttl_s,
+                    )
+
+                    # Voice control: stop/shut-up only counts when addressed to a bot,
+                    # so ordinary speech containing "stop" can't kill the pipeline.
+                    if stop_pattern.search(text_response):
                         control_payload = {
                             "action": "stop",
-                            "target": target,
+                            "target": routed,
                             "trace_id": trace_id,
                             "guild_id": guild_id,
                             "channel_id": channel_id,
                             "user_id": user_id,
                             "message": text_response,
                         }
-                        await asyncio.to_thread(redis_client.lpush, VOICE_CONTROL_QUEUE, json.dumps(control_payload))
+                        control_queue = (
+                            VOICE_CONTROL_DERF_QUEUE
+                            if routed == "derf"
+                            else VOICE_CONTROL_NIC_QUEUE
+                        )
+                        await asyncio.to_thread(
+                            redis_client.lpush,
+                            control_queue,
+                            json.dumps(control_payload),
+                        )
                         logger.info(
                             "whisper.control_enqueued trace_id=%s action=stop target=%s queue=%s",
                             trace_id,
-                            target,
-                            VOICE_CONTROL_QUEUE,
+                            routed,
+                            control_queue,
                         )
                         # Clean up audio + inflight; no DB insert or LLM routing.
                         try:
@@ -298,13 +429,17 @@ class WhisperWorker:
                                 os.remove(audio_path)
                         except Exception:
                             pass
-                        await asyncio.to_thread(redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value)
+                        await asyncio.to_thread(
+                            redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value
+                        )
                         continue
 
-                    db.insert_entry(user_id, text_response)
+                    await asyncio.to_thread(db.insert_entry, user_id, text_response)
 
                     payload = {
-                        "unique_id": str(randint(100000, 999999)),
+                        # uuid4: randint IDs collide (1-in-900k), and a collision
+                        # cross-wires TTS temp paths and summarizer keys.
+                        "unique_id": uuid.uuid4().hex,
                         "message": text_response,
                     }
                     # Carry metadata forward for multi-guild routing later.
@@ -316,26 +451,22 @@ class WhisperWorker:
                         payload["channel_id"] = channel_id
                     payload["user_id"] = user_id
 
-                    if bot_name_pattern.search(text_response):
-                        await asyncio.to_thread(redis_client.lpush, VOICE_RESPONSE_QUEUE, json.dumps(payload))
-                        logger.info("whisper.routed trace_id=%s queue=%s", trace_id, VOICE_RESPONSE_QUEUE)
-                        if os.path.exists(audio_path):
-                            os.remove(audio_path)
-                        await asyncio.to_thread(redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value)
-                    elif nic_bot_name_pattern.search(text_response):
-                        await asyncio.to_thread(redis_client.lpush, VOICE_NIC_RESPONSE_QUEUE, json.dumps(payload))
-                        logger.info("whisper.routed trace_id=%s queue=%s", trace_id, VOICE_NIC_RESPONSE_QUEUE)
-                        if os.path.exists(audio_path):
-                            os.remove(audio_path)
-                        await asyncio.to_thread(redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value)
-                    else:
-                        logger.info(
-                            "whisper.unrouted trace_id=%s reason=no_bot_name preview=%s",
-                            trace_id,
-                            preview,
-                        )
-                        # Keep audio file if we didn't route it.
-                        await asyncio.to_thread(redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value)
+                    response_queue = (
+                        VOICE_RESPONSE_QUEUE
+                        if routed == "derf"
+                        else VOICE_NIC_RESPONSE_QUEUE
+                    )
+                    await asyncio.to_thread(
+                        redis_client.lpush, response_queue, json.dumps(payload)
+                    )
+                    logger.info(
+                        "whisper.routed trace_id=%s queue=%s", trace_id, response_queue
+                    )
+                    if os.path.exists(audio_path):
+                        os.remove(audio_path)
+                    await asyncio.to_thread(
+                        redis_client.lrem, WHISPER_INFLIGHT_QUEUE, 1, raw_value
+                    )
 
                 except Exception as e:
                     # Important: if we crashed mid-processing, keep the job in inflight.

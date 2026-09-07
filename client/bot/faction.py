@@ -23,30 +23,25 @@ class FactionCog(commands.Cog):
         with sqlite3.connect(FACTION_DB) as conn:
             c = conn.cursor()
 
-            c.execute(
-                """
+            c.execute("""
             CREATE TABLE IF NOT EXISTS factions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT UNIQUE,
                 symbol TEXT,
                 color TEXT
             )
-            """
-            )
+            """)
 
-            c.execute(
-                """
+            c.execute("""
             CREATE TABLE IF NOT EXISTS user_factions (
                 user_id INTEGER PRIMARY KEY,
                 faction_id INTEGER,
                 joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (faction_id) REFERENCES factions(id)
             )
-            """
-            )
+            """)
 
-            c.execute(
-                """
+            c.execute("""
             CREATE TABLE IF NOT EXISTS faction_scores (
                 faction_id INTEGER,
                 emoji TEXT,
@@ -55,11 +50,9 @@ class FactionCog(commands.Cog):
                 PRIMARY KEY (faction_id, emoji),
                 FOREIGN KEY (faction_id) REFERENCES factions(id)
             )
-            """
-            )
+            """)
 
-            c.execute(
-                """
+            c.execute("""
             CREATE TABLE IF NOT EXISTS war_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ended_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -68,17 +61,14 @@ class FactionCog(commands.Cog):
                 usage_count INTEGER,
                 FOREIGN KEY (faction_id) REFERENCES factions(id)
             )
-            """
-            )
+            """)
 
-            c.execute(
-                """
+            c.execute("""
             CREATE TABLE IF NOT EXISTS war_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 started_at TIMESTAMP
             )
-            """
-            )
+            """)
 
             # Add warning columns if they don't exist yet (safe even if they already exist)
             c.execute("PRAGMA table_info(war_state)")
@@ -171,14 +161,12 @@ class FactionCog(commands.Cog):
         with sqlite3.connect(FACTION_DB) as conn:
             c = conn.cursor()
 
-            c.execute(
-                """
+            c.execute("""
                 SELECT factions.id, COUNT(user_factions.user_id) as count
                 FROM factions
                 LEFT JOIN user_factions ON factions.id = user_factions.faction_id
                 GROUP BY factions.id
-            """
-            )
+            """)
             faction_counts = c.fetchall()
             min_count = min(fc[1] for fc in faction_counts)
             least_filled = [fc[0] for fc in faction_counts if fc[1] == min_count]
@@ -360,25 +348,21 @@ class FactionCog(commands.Cog):
             )
 
             # Get faction scores
-            c.execute(
-                """
+            c.execute("""
                 SELECT factions.id, factions.name, factions.symbol, factions.color, 
                     SUM(faction_scores.usage_count) as score
                 FROM factions
                 LEFT JOIN faction_scores ON factions.id = faction_scores.faction_id
                 GROUP BY factions.id
                 ORDER BY score DESC
-            """
-            )
+            """)
             rows = c.fetchall()
 
             # Get faction members
-            c.execute(
-                """
+            c.execute("""
                 SELECT user_id, faction_id 
                 FROM user_factions
-            """
-            )
+            """)
             all_members = c.fetchall()
             member_map = {}
             for user_id, faction_id in all_members:
@@ -445,15 +429,13 @@ class FactionCog(commands.Cog):
             total_usage = c.fetchone()[0] or 0
 
             # Faction scores
-            c.execute(
-                """
+            c.execute("""
                 SELECT factions.name, factions.symbol, SUM(faction_scores.usage_count) as score
                 FROM factions
                 LEFT JOIN faction_scores ON factions.id = faction_scores.faction_id
                 GROUP BY factions.id
                 ORDER BY score DESC
-            """
-            )
+            """)
             faction_rows = c.fetchall()
 
         if not faction_rows:
@@ -542,15 +524,13 @@ class FactionCog(commands.Cog):
             start_time = datetime.fromisoformat(result[0]).replace(tzinfo=timezone.utc)
             if datetime.now(timezone.utc) - start_time >= timedelta(weeks=1):
                 # Fetch faction scores
-                c.execute(
-                    """
+                c.execute("""
                     SELECT factions.name, factions.symbol, SUM(faction_scores.usage_count) as score
                     FROM factions
                     LEFT JOIN faction_scores ON factions.id = faction_scores.faction_id
                     GROUP BY factions.id
                     ORDER BY score DESC
-                    """
-                )
+                    """)
                 scores = c.fetchall()
 
                 # Prepare the announcement message
@@ -610,15 +590,13 @@ class FactionCog(commands.Cog):
         """Displays the results of past wars from the war_history table."""
         with sqlite3.connect(FACTION_DB) as conn:
             c = conn.cursor()
-            c.execute(
-                """
+            c.execute("""
                 SELECT factions.name, factions.symbol, COALESCE(SUM(war_history.usage_count), 0) as score
                 FROM factions
                 LEFT JOIN war_history ON factions.id = war_history.faction_id
                 GROUP BY factions.id
                 ORDER BY score DESC
-                """
-            )
+                """)
             results = c.fetchall()
 
         if not results:

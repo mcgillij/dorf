@@ -23,7 +23,13 @@ WHISPER_INFLIGHT_QUEUE = "whisper_inflight_queue"
 WHISPER_DEAD_QUEUE = "whisper_dead_queue"
 VOICE_RESPONSE_QUEUE = "voice_response_queue"
 VOICE_NIC_RESPONSE_QUEUE = "voice_nic_response_queue"
-VOICE_CONTROL_QUEUE = "voice_control_queue"
+# Items that keep failing after retries go here for postmortem instead of
+# vanishing.
+VOICE_RESPONSE_DEAD_QUEUE = "voice_response_dead_queue"
+# Per-bot control queues: a shared control queue plus competing BLPOP consumers
+# meant a "stop" could be consumed by the wrong bot and leave the other talking.
+VOICE_CONTROL_DERF_QUEUE = "voice_control_derf_queue"
+VOICE_CONTROL_NIC_QUEUE = "voice_control_nic_queue"
 
 # When set (with TTL), workers should suppress TTS/playback.
 VOICE_STOP_KEY_PREFIX = "voice_stop"

@@ -1,21 +1,28 @@
 import json
 import asyncio
 import logging
-import time
 
 import discord
 
 from bot.redis_client import redis_client
 from bot.constants import (
-    VOICE_CONTROL_QUEUE,
     VOICE_STOP_KEY_PREFIX,
     DERF_AUDIO_QUEUE,
     NIC_AUDIO_QUEUE,
     DERF_PLAYBACK_QUEUE,
     NIC_PLAYBACK_QUEUE,
+    VOICE_CONTROL_DERF_QUEUE,
+    VOICE_CONTROL_NIC_QUEUE,
 )
 
 logger = logging.getLogger(__name__)
+
+# Each bot consumes only its own control queue so a stop for one persona can
+# never be swallowed by the other bot's worker.
+CONTROL_QUEUES = {
+    "derf": VOICE_CONTROL_DERF_QUEUE,
+    "nic": VOICE_CONTROL_NIC_QUEUE,
+}
 
 
 def _stop_key(guild_id: int | None, channel_id: int | None, target: str) -> str:
@@ -25,7 +32,9 @@ def _stop_key(guild_id: int | None, channel_id: int | None, target: str) -> str:
     return f"{VOICE_STOP_KEY_PREFIX}:{gid}:{cid}:{target}"
 
 
-async def _set_stop_flags(*, guild_id: int | None, channel_id: int | None, target: str, ttl_s: int) -> None:
+async def _set_stop_flags(
+    *, guild_id: int | None, channel_id: int | None, target: str, ttl_s: int
+) -> None:
     # Always set "all" when stopping a specific persona, so shared workers can obey it.
     keys = {_stop_key(guild_id, channel_id, "all")}
     keys.add(_stop_key(guild_id, channel_id, target))
@@ -51,19 +60,25 @@ async def _clear_queues(target: str) -> None:
             pass
 
 
-async def _stop_voice_client(bot_instance, *, guild_id: int | None, channel_id: int | None) -> None:
+async def _stop_voice_client(
+    bot_instance, *, guild_id: int | None, channel_id: int | None
+) -> None:
     # Try to find the right voice client.
     voice_client = None
     try:
         if guild_id:
             guild = discord.utils.get(bot_instance.guilds, id=int(guild_id))
             if guild:
-                voice_client = discord.utils.get(bot_instance.voice_clients, guild=guild)
+                voice_client = discord.utils.get(
+                    bot_instance.voice_clients, guild=guild
+                )
         if voice_client is None and channel_id:
             channel = bot_instance.get_channel(int(channel_id))
             if channel is not None:
                 guild = channel.guild
-                voice_client = discord.utils.get(bot_instance.voice_clients, guild=guild)
+                voice_client = discord.utils.get(
+                    bot_instance.voice_clients, guild=guild
+                )
         if voice_client is None and bot_instance.voice_clients:
             voice_client = bot_instance.voice_clients[0]
     except Exception:
@@ -78,15 +93,22 @@ async def _stop_voice_client(bot_instance, *, guild_id: int | None, channel_id: 
 
 
 async def monitor_voice_control_queue(bot_instance, *, stop_ttl_s: int = 10) -> None:
-    """Consumes VOICE_CONTROL_QUEUE and applies stop/shutup actions.
+    """Consumes this bot's voice control queue and applies stop/shutup actions.
 
     This runs per-bot process, so it can directly stop the local voice client.
     """
 
-    logger.info("voice_control.start queue=%s stop_ttl_s=%s bot=%s", VOICE_CONTROL_QUEUE, stop_ttl_s, getattr(bot_instance, "name", None))
+    persona = getattr(bot_instance, "persona", None) or "derf"
+    control_queue = CONTROL_QUEUES.get(persona, VOICE_CONTROL_DERF_QUEUE)
+    logger.info(
+        "voice_control.start queue=%s stop_ttl_s=%s bot=%s",
+        control_queue,
+        stop_ttl_s,
+        getattr(bot_instance, "name", None),
+    )
     while True:
         try:
-            result = await asyncio.to_thread(redis_client.blpop, VOICE_CONTROL_QUEUE, 30)
+            result = await asyncio.to_thread(redis_client.blpop, control_queue, 30)
             if not result or len(result) < 2:
                 continue
             _, raw = result
@@ -96,7 +118,7 @@ async def monitor_voice_control_queue(bot_instance, *, stop_ttl_s: int = 10) -> 
             if action != "stop":
                 continue
 
-            target = (data.get("target") or "all").lower()
+            target = (data.get("target") or persona).lower()
             if target not in ("all", "derf", "nic"):
                 target = "all"
 
@@ -104,19 +126,40 @@ async def monitor_voice_control_queue(bot_instance, *, stop_ttl_s: int = 10) -> 
             channel_id = data.get("channel_id")
             trace_id = data.get("trace_id")
 
+            # Resolve stop keys from this bot's actual voice channel when we can,
+            # so they always match the keys checked by the audio/playback workers
+            # even if capture metadata was missing.
+            vc = next(
+                (v for v in bot_instance.voice_clients if getattr(v, "channel", None)),
+                None,
+            )
+            if vc is not None:
+                resolved_guild_id = vc.channel.guild.id
+                resolved_channel_id = vc.channel.id
+            else:
+                resolved_guild_id = guild_id or 0
+                resolved_channel_id = channel_id or 0
+
             logger.info(
                 "voice_control.stop trace_id=%s target=%s guild_id=%s channel_id=%s",
                 trace_id,
                 target,
-                guild_id,
-                channel_id,
+                resolved_guild_id,
+                resolved_channel_id,
             )
 
             # Stop any current playback immediately.
-            await _stop_voice_client(bot_instance, guild_id=guild_id, channel_id=channel_id)
+            await _stop_voice_client(
+                bot_instance, guild_id=resolved_guild_id, channel_id=resolved_channel_id
+            )
 
             # Suppress new playback briefly and clear pending queues.
-            await _set_stop_flags(guild_id=guild_id, channel_id=channel_id, target=target, ttl_s=stop_ttl_s)
+            await _set_stop_flags(
+                guild_id=resolved_guild_id,
+                channel_id=resolved_channel_id,
+                target=target,
+                ttl_s=stop_ttl_s,
+            )
             await _clear_queues(target)
 
         except Exception as e:

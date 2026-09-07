@@ -11,7 +11,6 @@ from bot.constants import (
     EMOJI_DB,
 )
 
-
 logger = logging.getLogger(__name__)
 
 CUSTOM_EMOJI_REGEX = re.compile(r"<a?:\w+:\d+>")
@@ -20,8 +19,7 @@ conn = sqlite3.connect(EMOJI_DB)
 c = conn.cursor()
 
 # Ensure quotes table exists
-c.execute(
-    """
+c.execute("""
     CREATE TABLE IF NOT EXISTS emoji_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -30,8 +28,7 @@ c.execute(
     last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, emoji)
 );
-"""
-)
+""")
 conn.commit()
 
 

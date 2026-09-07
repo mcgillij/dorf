@@ -1,2 +1,6 @@
-kill $(ps aux | grep derf | grep -v grep | awk '{print $2}')
-ps aux |grep whisper_worker |awk 'NR>1 {print $2}' |xargs kill
+#!/bin/bash
+# Stop the bot and STT worker. Empty PID lists are expected when nothing runs.
+pids=$(ps aux | grep -E "derfbot\.py" | grep -v grep | awk '{print $2}')
+if [ -n "$pids" ]; then kill $pids; fi
+pids=$(ps aux | grep -E "whisper_worker\.py" | grep -v grep | awk '{print $2}')
+if [ -n "$pids" ]; then kill $pids; fi

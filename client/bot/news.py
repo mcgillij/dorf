@@ -12,7 +12,6 @@ from bot.constants import NEWS_DB
 from bot.config import CHAT_CHANNEL_ID
 from bot.lms import summarize
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -27,28 +26,23 @@ class NewsAgent(commands.Cog):
     def _initialize_db(self):
         """Initialize the SQLite database with required tables."""
         cursor = self.db.cursor()
-        cursor.execute(
-            """
+        cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT NOT NULL,
             location TEXT,
             country TEXT
         )
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
         CREATE TABLE IF NOT EXISTS preferences (
             user_id INTEGER,
             topic TEXT NOT NULL,
             source TEXT,
             FOREIGN KEY (user_id) REFERENCES users (user_id)
         )
-        """
-        )
-        cursor.execute(
-            """
+        """)
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS scheduled_tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_name TEXT NOT NULL,
@@ -58,8 +52,7 @@ class NewsAgent(commands.Cog):
                 user_id INTEGER NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users (user_id)
         )
-        """
-        )
+        """)
         self.db.commit()
 
     async def cog_unload(self):

@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 import discord
 import logging
 from bot.constants import DERF_PLAYBACK_QUEUE, NIC_PLAYBACK_QUEUE
@@ -39,7 +40,9 @@ async def playback_task(bot_instance, queue_name, voice_channel_id):
                 logger.info("Voice client not connected. Attempting to reconnect...")
                 try:
                     await connect_to_voice(bot_instance)
-                    voice_client = discord.utils.get(bot_instance.voice_clients, guild=guild)
+                    voice_client = discord.utils.get(
+                        bot_instance.voice_clients, guild=guild
+                    )
                 except discord.ClientException as e:
                     logger.error(f"Error connecting to voice channel: {e}")
                     continue
@@ -79,25 +82,49 @@ async def playback_task(bot_instance, queue_name, voice_channel_id):
                     continue
             except Exception:
                 pass
-            # state for godot bot
+            # state for godot bot (sync sqlite — keep it off the event loop)
             if bot_instance.statemanager:
-                bot_instance.statemanager.update_state_talking()
+                await asyncio.to_thread(bot_instance.statemanager.update_state_talking)
 
-            # Play the generated audio
+            # Play the generated audio. If a leftover player is still active
+            # (play() would raise 'Already playing audio' and we'd drop this
+            # item), give it a bounded grace period to finish first.
+            grace_started = time.monotonic()
+            while voice_client.is_playing() and time.monotonic() - grace_started < 30.0:
+                await asyncio.sleep(0.1)
+
+            # from_probe is an async classmethod; it must be awaited, not run
+            # via to_thread (which would return an un-awaited coroutine).
             audio_source = await discord.FFmpegOpusAudio.from_probe(
                 opus_path, method="fallback", options="-vn -b:a 128k"
             )
-            voice_client.play(
-                audio_source,
-                after=lambda e: logger.error(f"Player error: {e}") if e else None,
-            )
 
-            # Wait for the audio to finish playing
-            while voice_client.is_playing():
-                await asyncio.sleep(0.1)
+            # Event-driven completion: the after= callback sets an event rather
+            # than busy-polling is_playing(), and the wait is bounded so a hung
+            # player (mid-play disconnect stalls up to 30s) can't wedge the
+            # worker forever.
+            done = asyncio.Event()
+
+            def _after(error):
+                if error:
+                    logger.error(
+                        "playback.player_error unique_id=%s error=%s", unique_id, error
+                    )
+                done.set()
+
+            voice_client.play(audio_source, after=_after)
+
+            timeout_s = float(os.getenv("PLAYBACK_TIMEOUT_S", "300"))
+            try:
+                await asyncio.wait_for(done.wait(), timeout=timeout_s)
+            except asyncio.TimeoutError:
+                logger.error(
+                    "playback.timeout unique_id=%s timeout_s=%s", unique_id, timeout_s
+                )
+                voice_client.stop()
             # state for godot bot
             if bot_instance.statemanager:
-                bot_instance.statemanager.update_state_idle()
+                await asyncio.to_thread(bot_instance.statemanager.update_state_idle)
             # Clean up the opus file
             if os.path.exists(opus_path):
                 os.remove(opus_path)

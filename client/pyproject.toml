@@ -8,27 +8,27 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.13.0,<3.14"
-discord-py = "2.6.4"
-redis = "^5.2.1"
+discord-py = "^2.7"
+redis = "^8.1"
 pydub = "^0.25.1"
-pynacl = "^1.5.0"
-python-dotenv = "^1.0.1"
+pynacl = "^1.5"
+python-dotenv = "^1.2.3"
 pyaudio = "^0.2.14"
-aiohttp = "^3.11.11"
-numpy = "^2.2.1"
+aiohttp = "^3.14"
+numpy = "^2.5"
 discord-ext-voice-recv = { git = "https://github.com/imayhaveborkedit/discord-ext-voice-recv.git" }
-soundfile = "^0.13.1"
+soundfile = "^0.14.0"
 lmstudio = "*"
 dice = "^4.0.0"
-emoji = "^2.14.1"
-pandas = "^2.2.3"
-matplotlib = "^3.10.1"
-websocket-client = "^1.8.0"
-trafilatura = "^2.0.0"
-chromadb = "^1.0.7"
-pillow = "^11.2.1"
-websockets = "^15.0.1"
-rapidfuzz = "^3.13.0"
+emoji = "^2.15.0"
+pandas = "^3.0"
+matplotlib = "^3.11"
+websocket-client = "^1.9.2"
+trafilatura = "^2.2"
+chromadb = "^1.5"
+pillow = "^12.3"
+websockets = "^17.1"
+rapidfuzz = "^3.14.6"
 
 loguru = "^0.7.3"
 
@@ -56,7 +56,7 @@ spacy = { version = "^3.8.0", python = "<3.13" }
 
 [tool.poetry.group.dev.dependencies]
 watchdog = "^6.0.0"
-black = "^25.1.0"
+black = "^26.1"
 
 
 [build-system]

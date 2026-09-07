@@ -8,3 +8,5 @@ frieren
 *.json
 prompts/
 docs/
+models/
+logs/

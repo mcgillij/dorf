@@ -15,16 +15,14 @@ class SQLiteDB:
         logger.info("Creating table")
         with sqlite3.connect(self.db_name) as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                """
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS voice_responses (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id TEXT,
                     message TEXT,
                     datetime TEXT
                 )
-            """
-            )
+            """)
 
     def insert_entry(self, user_id: str, message: str):
         """Insert a new entry into the table."""

@@ -1,12 +1,13 @@
 import json
 import logging
 import asyncio
+import os
 import uuid
 
 from bot.utilities import (
     split_message,
     generate_unique_id,
-    poll_redis_for_key,
+    poll_redis_for_key_with_timeout,
     replace_userids_with_username,
     preprocess_mentions,
     postprocess_mentions,
@@ -28,21 +29,21 @@ from bot.constants import (
 
 logger = logging.getLogger(__name__)
 
-# Context dictionary
-context_dict = {}
+# How long a text command waits for the response worker before giving up.
+RESPONSE_WAIT_MAX_S = float(os.getenv("RESPONSE_WAIT_MAX_S", "120"))
 
 
 # Generalized function to queue message processing
 async def queue_message_processing(ctx, message: str, queue_name: str):
     unique_id = generate_unique_id(ctx, message)
     logger.info(f"{queue_name.capitalize()}: Unique ID: {unique_id}")
-    # Store the context if not already stored
-    context_dict.setdefault(unique_id, ctx)
     # Preprocess mentions
     message, mention_map = await preprocess_mentions(ctx, message)
     # Store mention map in Redis
     mention_map_key = f"mention_map:{unique_id}"
-    await asyncio.to_thread(redis_client.set, mention_map_key, json.dumps(mention_map), ex=3600)  # 1 hour TTL
+    await asyncio.to_thread(
+        redis_client.set, mention_map_key, json.dumps(mention_map), ex=3600
+    )  # 1 hour TTL
     logger.info(f"Here's the username: {ctx.author.name}")
     await asyncio.to_thread(
         redis_client.lpush,
@@ -69,10 +70,28 @@ async def process_response(
     summarizer_queue: str,
     audio_queue_func,
 ):
-    # Poll Redis for the result
+    # Poll Redis for the result (bounded: a dead response worker must not hang
+    # the command forever).
     key = f"{response_key_prefix}:{unique_id}"
-    response = await poll_redis_for_key(key)
+    response = await poll_redis_for_key_with_timeout(
+        key, max_wait_s=RESPONSE_WAIT_MAX_S, delete=True
+    )
+    if response is None:
+        logger.error(
+            "%s: no response after %.0fs (response worker down?); key=%s",
+            response_key_prefix,
+            RESPONSE_WAIT_MAX_S,
+            key,
+        )
+        await ctx.send("Something went wrong getting a response — try again in a bit.")
+        return
     logger.debug(f"{response_key_prefix.capitalize()}: Response: {response}")
+    if not response.strip():
+        logger.warning(
+            "%s: LLM returned an empty response; key=%s", response_key_prefix, key
+        )
+        await ctx.send("I couldn't come up with a response — try again in a bit.")
+        return
     # Postprocess mentions
     mention_map_key = f"mention_map:{unique_id}"
     mention_map_raw = await asyncio.to_thread(redis_client.get, mention_map_key)
@@ -95,9 +114,11 @@ async def process_response(
         response_text=response,
         unique_id=str(unique_id),
         summarizer_queue_name=summarizer_queue,
-        audio_queue_name=DERF_AUDIO_QUEUE
-        if response_key_prefix == DERF_RESPONSE_KEY
-        else NIC_AUDIO_QUEUE,
+        audio_queue_name=(
+            DERF_AUDIO_QUEUE
+            if response_key_prefix == DERF_RESPONSE_KEY
+            else NIC_AUDIO_QUEUE
+        ),
         human_in_voice_channel=human_in_voice_channel,
         ctx=RequestContext(
             trace_id=str(uuid.uuid4()),
@@ -136,7 +157,9 @@ async def process_audio_queue(unique_id: str, messages: list[str], queue_name: s
     """Queues messages for audio generation if users are in the voice channel."""
     index = 1
     for msg in messages:
-        await asyncio.to_thread(redis_client.lpush, queue_name, f"{unique_id}|{index}|{msg}")
+        await asyncio.to_thread(
+            redis_client.lpush, queue_name, f"{unique_id}|{index}|{msg}"
+        )
         index += 1
 
 

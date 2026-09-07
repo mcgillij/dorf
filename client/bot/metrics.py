@@ -27,8 +27,7 @@ class Metrics(commands.Cog):
     def ensure_tables(self):
         with sqlite3.connect(METRICS_DB) as conn:
             c = conn.cursor()
-            c.execute(
-                """
+            c.execute("""
                 CREATE TABLE IF NOT EXISTS bot_usage (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     type TEXT,
@@ -38,10 +37,8 @@ class Metrics(commands.Cog):
                     guild_id INTEGER,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            """
-            )
-            c.execute(
-                """
+            """)
+            c.execute("""
                 CREATE TABLE IF NOT EXISTS weekly_metrics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     week TEXT,
@@ -50,8 +47,7 @@ class Metrics(commands.Cog):
                     count INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            """
-            )
+            """)
             conn.commit()
 
     @commands.Cog.listener()

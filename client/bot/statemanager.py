@@ -17,15 +17,13 @@ class StateManager(commands.Cog):
         """Creates the database and table if they don't exist."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS avatar_state (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 state TEXT NOT NULL CHECK(state IN ('idle', 'talking', 'thinking', 'drawing')),
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """
-        )
+        """)
         conn.commit()
         cursor.execute(
             # test entries
