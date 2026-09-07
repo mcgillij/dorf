@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # GitHub only reads .github/workflows at the repo root — this workflow
+      # previously lived under client/ and never ran. It needs the project's
+      # real dependencies (tests import bot.audio_capture -> discord.py,
+      # discord-ext-voice-recv, pydub), not just ruff+pytest.
+      - name: Install poetry
+        run: pipx install poetry
+
+      - name: Cache poetry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-${{ runner.os }}-${{ hashFiles('client/poetry.lock') }}
+          restore-keys: poetry-${{ runner.os }}-
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y portaudio19-dev
+
+      - name: Install project dependencies
+        run: poetry install --no-interaction
+
+      - name: Lint
+        run: poetry run ruff check bot/ whisper_worker.py derfbot.py tests/
+
+      - name: Tests
+        run: poetry run python -m pytest tests/ -q
+        env:
+          # bot.config hard-fails at import without tokens; CI only needs the
+          # imports to succeed, not real credentials.
+          DISCORD_BOT_TOKEN: ci-placeholder
+          NIC_DISCORD_BOT_TOKEN: ci-placeholder
+          AUTH_TOKEN: ci-placeholder
+          VOICE_CHANNEL_ID: "0"
+          CHAT_CHANNEL_ID: "0"

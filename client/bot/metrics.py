@@ -1,5 +1,4 @@
 import io
-import sqlite3
 import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
@@ -13,6 +12,7 @@ from matplotlib import rcParams
 import pandas as pd
 
 from bot.constants import METRICS_DB, EMOJI_DB
+from bot.db import open_db
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class Metrics(commands.Cog):
         self.channel_cache = {}
 
     def ensure_tables(self):
-        with sqlite3.connect(METRICS_DB) as conn:
+        with open_db(METRICS_DB) as conn:
             c = conn.cursor()
             c.execute("""
                 CREATE TABLE IF NOT EXISTS bot_usage (
@@ -56,7 +56,7 @@ class Metrics(commands.Cog):
         if message.author.bot:
             return
 
-        with sqlite3.connect(METRICS_DB) as conn:
+        with open_db(METRICS_DB) as conn:
             c = conn.cursor()
             c.execute(
                 """
@@ -74,7 +74,7 @@ class Metrics(commands.Cog):
 
     @commands.Cog.listener()
     async def on_command(self, ctx):
-        with sqlite3.connect(METRICS_DB) as conn:
+        with open_db(METRICS_DB) as conn:
             c = conn.cursor()
             c.execute(
                 """
@@ -96,7 +96,7 @@ class Metrics(commands.Cog):
         if user.bot:
             return
 
-        with sqlite3.connect(METRICS_DB) as conn:
+        with open_db(METRICS_DB) as conn:
             c = conn.cursor()
             c.execute(
                 """
@@ -120,7 +120,7 @@ class Metrics(commands.Cog):
         # ("YYYY-MM-DD HH:MM:SS"); isoformat() only worked by accident of
         # ' ' < 'T' in lexical comparison.
         cutoff = one_week_ago.strftime("%Y-%m-%d %H:%M:%S")
-        with sqlite3.connect(METRICS_DB) as conn:
+        with open_db(METRICS_DB) as conn:
             c = conn.cursor()
             c.execute(
                 """
@@ -182,7 +182,7 @@ class Metrics(commands.Cog):
     @commands.command(name="emoji_usage")
     async def emoji_usage(self, ctx):
         """Show overall emoji usage metrics."""
-        with sqlite3.connect(EMOJI_DB) as conn:
+        with open_db(EMOJI_DB) as conn:
             df = pd.read_sql_query(
                 """
                 SELECT emoji, SUM(usage_count) as total_usage
@@ -200,7 +200,7 @@ class Metrics(commands.Cog):
     @commands.command(name="emoji_trends")
     async def emoji_trends(self, ctx, emoji_char: str):
         """Show usage trends for a specific emoji. format: <emoji>:str"""
-        with sqlite3.connect(EMOJI_DB) as conn:
+        with open_db(EMOJI_DB) as conn:
             df = pd.read_sql_query(
                 """
                 SELECT date(last_used) as day, SUM(usage_count) as count
@@ -221,7 +221,7 @@ class Metrics(commands.Cog):
     @commands.command(name="activity_over_time")
     async def activity_over_time(self, ctx):
         """Shows the activity over time"""
-        with sqlite3.connect(METRICS_DB) as conn:
+        with open_db(METRICS_DB) as conn:
             df = pd.read_sql_query(
                 """
                 SELECT date(timestamp) as day, type, COUNT(*) as count
@@ -240,7 +240,7 @@ class Metrics(commands.Cog):
     @commands.command(name="top_users")
     async def top_users(self, ctx):
         """Show the top users"""
-        with sqlite3.connect(METRICS_DB) as conn:
+        with open_db(METRICS_DB) as conn:
             df = pd.read_sql_query(
                 """
                 SELECT user_id, type, COUNT(*) as count
@@ -276,7 +276,7 @@ class Metrics(commands.Cog):
     @commands.command(name="channel_breakdown")
     async def channel_breakdown(self, ctx):
         """Show the channel breakdown graph"""
-        with sqlite3.connect(METRICS_DB) as conn:
+        with open_db(METRICS_DB) as conn:
             df = pd.read_sql_query(
                 """
                 SELECT channel_id, type, COUNT(*) as count
@@ -325,7 +325,7 @@ class Metrics(commands.Cog):
     @commands.command(name="command_usage")
     async def command_usage(self, ctx):
         """Shows the aggregate command usage"""
-        with sqlite3.connect(METRICS_DB) as conn:
+        with open_db(METRICS_DB) as conn:
             df = pd.read_sql_query(
                 """
                 SELECT name, COUNT(*) as count FROM bot_usage
@@ -341,7 +341,7 @@ class Metrics(commands.Cog):
     @commands.command(name="weekly_summary")
     async def weekly_summary(self, ctx):
         """Show the weekly summary"""
-        with sqlite3.connect(METRICS_DB) as conn:
+        with open_db(METRICS_DB) as conn:
             df = pd.read_sql_query(
                 """
                 SELECT week, type, SUM(count) as total FROM weekly_metrics
@@ -358,7 +358,7 @@ class Metrics(commands.Cog):
     @commands.command(name="command_trends")
     async def command_trends(self, ctx, command_name):
         """Show the command trends of a particular command, format: <command_name>:str"""
-        with sqlite3.connect(METRICS_DB) as conn:
+        with open_db(METRICS_DB) as conn:
             df = pd.read_sql_query(
                 """
                 SELECT date(timestamp) as day, COUNT(*) as count FROM bot_usage

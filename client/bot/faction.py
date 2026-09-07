@@ -1,5 +1,4 @@
 import asyncio
-import sqlite3
 import random
 import logging
 from datetime import datetime, timedelta, timezone
@@ -7,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import discord
 from discord.ext import commands, tasks
 from bot.constants import FACTION_DB, DEFAULT_FACTIONS
+from bot.db import open_db
 from bot.config import CHAT_CHANNEL_ID
 from bot.emoji import extract_emojis
 from bot.redis_client import redis_client
@@ -22,7 +22,7 @@ class FactionCog(commands.Cog):
         self.check_war_warnings.start()
 
     def init_db(self):
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
 
             c.execute("""
@@ -111,7 +111,7 @@ class FactionCog(commands.Cog):
     @tasks.loop(minutes=5)
     async def check_war_warnings(self):
         WAR_DURATION_DAYS = 7
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
             c.execute(
                 "SELECT started_at, warning_24h_sent, warning_12h_sent, warning_1h_sent FROM war_state WHERE id = 1"
@@ -161,7 +161,7 @@ class FactionCog(commands.Cog):
                 conn.commit()
 
     def assign_faction(self, user_id):
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
 
             c.execute("""
@@ -183,7 +183,7 @@ class FactionCog(commands.Cog):
             return chosen_faction
 
     def get_user_faction(self, user_id):
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
             c.execute(
                 "SELECT faction_id FROM user_factions WHERE user_id = ?", (user_id,)
@@ -222,7 +222,7 @@ class FactionCog(commands.Cog):
         if not faction_id:
             faction_id = self.assign_faction(user_id)
 
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
             c.execute(
                 """
@@ -250,7 +250,7 @@ class FactionCog(commands.Cog):
         if not faction_id:
             faction_id = self.assign_faction(user_id)
 
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
             for emj in emojis:
                 c.execute(
@@ -274,7 +274,7 @@ class FactionCog(commands.Cog):
         if not faction_id:
             faction_id = self.assign_faction(user_id)
 
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
 
             # Faction details
@@ -354,7 +354,7 @@ class FactionCog(commands.Cog):
     @commands.command(name="factionleaderboard", aliases=["fl"])
     async def factionleaderboard(self, ctx):
         """Show the faction leaderboard."""
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
 
             # Fetch war start date
@@ -401,9 +401,14 @@ class FactionCog(commands.Cog):
 
             members = []
             for member_id in member_ids:
-                member = self.bot.get_user(member_id) or await self.bot.fetch_user(
-                    member_id
-                )
+                member = self.bot.get_user(member_id)
+                if member is None:
+                    # Deleted users raise NotFound; don't let one corpse kill
+                    # the whole leaderboard.
+                    try:
+                        member = await self.bot.fetch_user(member_id)
+                    except (discord.NotFound, discord.HTTPException):
+                        member = None
                 members.append(
                     member.display_name if member else f"User ID {member_id}"
                 )
@@ -430,7 +435,7 @@ class FactionCog(commands.Cog):
     async def war_status(self, ctx):
         """Outputs the current war status"""
         WAR_DURATION_DAYS = 7
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
 
             # War start date
@@ -509,7 +514,7 @@ class FactionCog(commands.Cog):
     @commands.has_permissions(manage_guild=True)
     async def startwar(self, ctx):
         """Start a emoji war if one isn't already on-going"""
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
             c.execute("SELECT started_at FROM war_state WHERE id = 1")
             row = c.fetchone()
@@ -541,7 +546,7 @@ class FactionCog(commands.Cog):
     @tasks.loop(minutes=5)
     async def check_war_end(self):
         logger.debug("Checking if the emoji war should end.")
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
             c.execute("SELECT started_at FROM war_state WHERE id = 1")
             result = c.fetchone()
@@ -601,7 +606,7 @@ class FactionCog(commands.Cog):
                 await self.reset_factions()
 
     async def reset_factions(self):
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
             try:
                 # Transactional reset: dropping factions without reseeding left
@@ -641,7 +646,7 @@ class FactionCog(commands.Cog):
     @commands.command(name="war_history")
     async def show_war_history(self, ctx):
         """Displays the results of past wars from the war_history table."""
-        with sqlite3.connect(FACTION_DB) as conn:
+        with open_db(FACTION_DB) as conn:
             c = conn.cursor()
             c.execute("""
                 SELECT factions.name, factions.symbol, COALESCE(SUM(war_history.usage_count), 0) as score

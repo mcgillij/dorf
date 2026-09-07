@@ -9,10 +9,6 @@ spack
 frieren
 # runtime data read by bot/sdcog.py — must ship with a fresh clone
 *.json
-!waifu_prompts.json
-!war_waifus.json
-!checkpoints.json
-!input_spack.json
 prompts/
 docs/
 models/

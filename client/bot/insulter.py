@@ -1,4 +1,3 @@
-import sqlite3
 import logging
 import datetime
 import asyncio
@@ -6,6 +5,7 @@ from typing import Optional
 
 from discord.ext import commands, tasks
 from bot.constants import INSULT_DB
+from bot.db import open_db
 from bot.config import CHAT_CHANNEL_ID
 from bot.lms import qa_insult
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class Insulter(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db = sqlite3.connect(INSULT_DB)
+        self.db = open_db(INSULT_DB)
         self._initialize_db()
         self.running_tasks = {}  # Track running tasks by ID
         self.check_tasks.start()  # Start the periodic task

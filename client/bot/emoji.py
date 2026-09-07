@@ -1,5 +1,4 @@
 from collections import defaultdict
-import sqlite3
 import re
 import logging
 
@@ -10,12 +9,13 @@ from discord.ext import commands
 from bot.constants import (
     EMOJI_DB,
 )
+from bot.db import open_db
 
 logger = logging.getLogger(__name__)
 
 CUSTOM_EMOJI_REGEX = re.compile(r"<a?:\w+:\d+>")
 
-conn = sqlite3.connect(EMOJI_DB)
+conn = open_db(EMOJI_DB)
 c = conn.cursor()
 
 # Ensure quotes table exists
@@ -43,7 +43,7 @@ class EmojiUsageCog(commands.Cog):
 
         emojis = extract_emojis(message.content)
         if emojis:
-            with sqlite3.connect(EMOJI_DB) as conn:
+            with open_db(EMOJI_DB) as conn:
                 c = conn.cursor()
                 for em in emojis:
                     c.execute(
@@ -66,7 +66,7 @@ class EmojiUsageCog(commands.Cog):
         # Get the emoji as a string
         emoji_used = str(reaction.emoji)
 
-        with sqlite3.connect(EMOJI_DB) as conn:
+        with open_db(EMOJI_DB) as conn:
             c = conn.cursor()
             c.execute(
                 """
@@ -83,7 +83,7 @@ class EmojiUsageCog(commands.Cog):
     async def emojistats(self, ctx, user: discord.User = None):
         """Show emoji usage stats for a user (or yourself)."""
         user = user or ctx.author
-        with sqlite3.connect(EMOJI_DB) as conn:
+        with open_db(EMOJI_DB) as conn:
             c = conn.cursor()
             c.execute(
                 """
@@ -108,7 +108,7 @@ class EmojiUsageCog(commands.Cog):
         # Bound the work: top_n is user-provided and drives the SQL LIMIT
         # plus per-row user lookups.
         top_n = min(top_n, 25)
-        with sqlite3.connect(EMOJI_DB) as conn:
+        with open_db(EMOJI_DB) as conn:
             c = conn.cursor()
             c.execute(
                 """

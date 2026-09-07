@@ -1,18 +1,18 @@
 import logging
-import sqlite3
 from contextlib import closing
 
 from discord.ext import commands
 
 from bot.config import AvatarState
 from bot.constants import AVATAR_STATE_DB_PATH
+from bot.db import open_db
 
 logger = logging.getLogger(__name__)
 
 
 def _initialize_database(db_path=AVATAR_STATE_DB_PATH):
     """Creates the database and table if they don't exist."""
-    with closing(sqlite3.connect(db_path)) as conn:
+    with closing(open_db(db_path)) as conn:
         cursor = conn.cursor()
         # Wait instead of failing with "database is locked" when another
         # process holds a write lock on the shared DB file.
@@ -44,7 +44,7 @@ def update_state(state: AvatarState):
     # getattr() also accepts plain strings ("talking") alongside AvatarState
     # members, so standalone callers don't have to build the enum.
     state_value = getattr(state, "value", state)
-    with closing(sqlite3.connect(AVATAR_STATE_DB_PATH)) as conn:
+    with closing(open_db(AVATAR_STATE_DB_PATH)) as conn:
         cursor = conn.cursor()
         cursor.execute("PRAGMA busy_timeout=5000")
         cursor.execute("INSERT INTO avatar_state (state) VALUES (?)", (state_value,))
@@ -60,7 +60,7 @@ def update_state(state: AvatarState):
 
 def get_current_state() -> str:
     """Retrieves the most recent avatar state from the database."""
-    with closing(sqlite3.connect(AVATAR_STATE_DB_PATH)) as conn:
+    with closing(open_db(AVATAR_STATE_DB_PATH)) as conn:
         cursor = conn.cursor()
         cursor.execute("PRAGMA busy_timeout=5000")
         # Order by the AUTOINCREMENT id, not updated_at: CURRENT_TIMESTAMP

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import signal
 
 from bot.bots import DerfBot, NicBot
 from bot.log_config import setup_logging
@@ -20,17 +21,32 @@ nic_bot = NicBot()
 
 
 async def main():
+    loop = asyncio.get_running_loop()
+    stop = asyncio.Event()
+    # systemd sends SIGTERM on `systemctl stop`; ./kill sends SIGTERM/INT.
+    # Handle both instead of dying mid-write with no cleanup.
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, stop.set)
+
+    run = asyncio.gather(
+        nic_bot.start(NIC_DISCORD_BOT_TOKEN),
+        derf_bot.start(DISCORD_BOT_TOKEN),
+    )
+    run_task = asyncio.ensure_future(run)
+    stop_task = asyncio.ensure_future(stop.wait())
+
     try:
-        await asyncio.gather(
-            nic_bot.start(NIC_DISCORD_BOT_TOKEN),
-            derf_bot.start(DISCORD_BOT_TOKEN),
+        await asyncio.wait(
+            {run_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
         )
     finally:
-        # One bot failing (bad token, network) used to abandon the other
-        # mid-connection with no cleanup.
-        await asyncio.gather(
-            nic_bot.close(), derf_bot.close(), return_exceptions=True
-        )
+        if not run_task.done():
+            logger.info("shutdown signal received; stopping workers and bots.")
+            await asyncio.gather(
+                nic_bot.shutdown(), derf_bot.shutdown(), return_exceptions=True
+            )
+        # Reap the gather either way so a real failure still surfaces.
+        await asyncio.gather(run_task, return_exceptions=True)
 
 
 if __name__ == "__main__":

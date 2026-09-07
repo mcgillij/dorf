@@ -124,9 +124,21 @@ class BaseBot(commands.Bot):
         task = self.spawn_supervised("capture_watchdog", voice_capture_watchdog)
         self._worker_tasks.append(task)
 
+    async def shutdown(self):
+        """Cancel supervised workers, then close the gateway cleanly.
+
+        SIGTERM used to hard-kill the process mid-write with no worker
+        cancellation; this is the orderly path for systemd/`./kill` shutdowns.
+        """
+        tasks, self._worker_tasks = list(self._worker_tasks), []
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await self.close()
+
     def spawn_supervised(self, worker_name, factory):
         """Run `factory(self)` forever, restarting it with backoff if it dies."""
-
         async def _runner():
             delay = 1.0
             while True:

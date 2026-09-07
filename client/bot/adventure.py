@@ -26,7 +26,12 @@ class Adventure(commands.Cog):
 
     async def _respond(self, chat) -> str:
         # lmstudio calls are blocking; run them off the shared event loop.
-        return await asyncio.to_thread(self.model.respond, chat)
+        # self.model is resolved inside the thread as well — its first access
+        # runs lms.llm(), which connects to LM Studio and blocks.
+        def _run():
+            return self.model.respond(chat)
+
+        return await asyncio.to_thread(_run)
 
     async def send_adventure_message(self, ctx, content, add_reactions=True):
         """Helper to send a message and optionally add reaction options."""

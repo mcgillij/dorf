@@ -46,6 +46,23 @@ IANCAN_PROMPT = "dndchars/iancan.json"
 logger = logging.getLogger(__name__)
 
 
+def _spawn_logged(coro):
+    """Fire-and-forget that logs exceptions instead of silencing them."""
+    task = asyncio.create_task(coro)
+
+    def _log(t):
+        if not t.cancelled() and t.exception() is not None:
+            logger.error("background task failed", exc_info=t.exception())
+
+    task.add_done_callback(_log)
+    return task
+
+
+def _read_json(path):
+    with open(path, "r") as f:
+        return json.load(f)
+
+
 class ImageGen(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -58,9 +75,20 @@ class ImageGen(commands.Cog):
         # Bounded queue: cap pending image jobs so ComfyUI can't fall
         # hopelessly behind (use put_nowait + QueueFull at call sites).
         self.unified_queue = asyncio.Queue(maxsize=20)
-        self.image_processing_task = self.bot.loop.create_task(
+        self.image_processing_task = asyncio.create_task(
             self.process_unified_queue()
         )
+
+    async def cog_unload(self):
+        # Without this, a cog reload spawns a second consumer draining the
+        # same queue (double-sends, lost jobs).
+        task = getattr(self, "image_processing_task", None)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     async def process_unified_queue(self):
         logger.info("Processing unified queue...")
@@ -90,9 +118,11 @@ class ImageGen(commands.Cog):
                     user_prompt = data["prompt"]
                     logger.info(f"here is the prompt: {user_prompt}")
 
-                    # Process the image
-                    image = process_image_data(image_data)
-                    file_path, file_name = save_image_to_input_dir(image)
+                    # Process the image (PIL decode/resize blocks — offload)
+                    image = await asyncio.to_thread(process_image_data, image_data)
+                    file_path, file_name = await asyncio.to_thread(
+                        save_image_to_input_dir, image
+                    )
                     logger.info(f"Here is ctx.message{ctx.message}")
                     try:
                         await self.generate_and_send_images(
@@ -109,9 +139,11 @@ class ImageGen(commands.Cog):
                     user_prompt = data["prompt"]
                     logger.info(f"here is the prompt: {user_prompt}")
 
-                    # Process the image
-                    image = process_image_data(image_data)
-                    file_path, file_name = save_image_to_input_dir(image)
+                    # Process the image (PIL decode/resize blocks — offload)
+                    image = await asyncio.to_thread(process_image_data, image_data)
+                    file_path, file_name = await asyncio.to_thread(
+                        save_image_to_input_dir, image
+                    )
                     logger.info(f"Here is ctx.message{ctx.message}")
                     try:
                         await self.generate_and_send_images(
@@ -246,9 +278,11 @@ class ImageGen(commands.Cog):
                         image_data = await response.read()  # Read as binary data
                         logger.info("Image successfully downloaded.")
 
-                        # Process the image
-                        image = process_image_data(image_data)
-                        file_path, file_name = save_image_to_input_dir(image)
+                        # Process the image (PIL decode/resize blocks — offload)
+                        image = await asyncio.to_thread(process_image_data, image_data)
+                        file_path, file_name = await asyncio.to_thread(
+                            save_image_to_input_dir, image
+                        )
                         try:
                             if goblin:
                                 await self.generate_and_send_images(
@@ -279,17 +313,14 @@ class ImageGen(commands.Cog):
             f"Generating images for {file_name} with user prompt: {user_prompt}"
         )
         try:
-            with open("input_spack.json", "r") as f:
-                prompt = json.load(f)
-                self.update_prompt(prompt, file_name, user_prompt, photo)
+            prompt = await asyncio.to_thread(_read_json, "input_spack.json")
+            self.update_prompt(prompt, file_name, user_prompt, photo)
 
             images = await self.get_images(prompt)
             for image_datas in images.values():
                 for image_data in image_datas:
                     file = discord.File(BytesIO(image_data), filename="output.png")
-                    asyncio.create_task(
-                        message.channel.send(file=file)
-                    )  # Send asynchronously
+                    _spawn_logged(message.channel.send(file=file))
             await message.channel.send("Done processing ...")
         except Exception as e:
             logger.info(f"Error while processing the image: {e}")
@@ -498,31 +529,31 @@ class ImageGen(commands.Cog):
             logger.info(f"Character prompt file: {character_prompt}")
 
             try:
-                dnd_char_prompt = get_character_prompt(character_prompt)
+                dnd_char_prompt = await asyncio.to_thread(
+                    get_character_prompt, character_prompt
+                )
                 logger.info(f"Character prompt content: {dnd_char_prompt}")
 
-                with open("war_waifus.json", "r") as f:
-                    prompt = json.load(f)
+                prompt = await asyncio.to_thread(_read_json, "war_waifus.json")
+                checkpoint = await asyncio.to_thread(get_random_checkpoints)
+                ckpt_name, ckpt_data = next(iter(checkpoint.items()))
+                logger.info(f"Selected checkpoint: {ckpt_name}")
 
-                    checkpoint = get_random_checkpoints()
-                    ckpt_name, ckpt_data = next(iter(checkpoint.items()))
-                    logger.info(f"Selected checkpoint: {ckpt_name}")
-
-                    prompt["4"]["inputs"]["ckpt_name"] = ckpt_name
-                    prompt["3"]["inputs"]["seed"] = generate_random_seed()
-                    prompt["3"]["inputs"]["steps"] = get_random_steps(
-                        min(ckpt_data["steps"]), max(ckpt_data["steps"])
-                    )
-                    prompt["3"]["inputs"]["cfg"] = get_random_cfg(
-                        min(ckpt_data["cfg"]), max(ckpt_data["cfg"])
-                    )
-                    prompt["3"]["inputs"]["sampler_name"] = get_random_sampler(
-                        ckpt_data["samplers"]
-                    )
-                    prompt["6"]["inputs"]["text"] = dnd_char_prompt + ",".join(
-                        QUALITY_PROMPT_SUFFIX
-                    )
-                    logger.info(f"Final prompt: {prompt}")
+                prompt["4"]["inputs"]["ckpt_name"] = ckpt_name
+                prompt["3"]["inputs"]["seed"] = generate_random_seed()
+                prompt["3"]["inputs"]["steps"] = get_random_steps(
+                    min(ckpt_data["steps"]), max(ckpt_data["steps"])
+                )
+                prompt["3"]["inputs"]["cfg"] = get_random_cfg(
+                    min(ckpt_data["cfg"]), max(ckpt_data["cfg"])
+                )
+                prompt["3"]["inputs"]["sampler_name"] = get_random_sampler(
+                    ckpt_data["samplers"]
+                )
+                prompt["6"]["inputs"]["text"] = dnd_char_prompt + ",".join(
+                    QUALITY_PROMPT_SUFFIX
+                )
+                logger.info(f"Final prompt: {prompt}")
 
                 images = await self.get_images(prompt)
                 logger.info(f"Images received: {len(images)} nodes")
@@ -533,7 +564,7 @@ class ImageGen(commands.Cog):
                     )
                     for image_data in image_datas:
                         file = discord.File(BytesIO(image_data), filename="output.png")
-                        asyncio.create_task(ctx.send(file=file))  # Send asynchronously
+                        _spawn_logged(ctx.send(file=file))
                         logger.info(f"Image sent to Discord for node {node_id}")
             except Exception as e:
                 logger.error(f"Error generating image: {e}")
@@ -616,35 +647,35 @@ class ImageGen(commands.Cog):
         logger.info(f"passed in custom prompt: {user_prompt}")
         async with ctx.typing():  # have derf look like he's typing
             try:
-                with open("war_waifus.json", "r") as f:
-                    prompt = json.load(f)
-                    checkpoint = get_random_checkpoints()
-                    ckpt_name, ckpt_data = next(iter(checkpoint.items()))
-                    prompt["4"]["inputs"]["ckpt_name"] = ckpt_name
-                    prompt["3"]["inputs"]["seed"] = generate_random_seed()
-                    prompt["3"]["inputs"]["steps"] = get_random_steps(
-                        min(ckpt_data["steps"]), max(ckpt_data["steps"])
+                prompt = await asyncio.to_thread(_read_json, "war_waifus.json")
+                checkpoint = await asyncio.to_thread(get_random_checkpoints)
+                ckpt_name, ckpt_data = next(iter(checkpoint.items()))
+                prompt["4"]["inputs"]["ckpt_name"] = ckpt_name
+                prompt["3"]["inputs"]["seed"] = generate_random_seed()
+                prompt["3"]["inputs"]["steps"] = get_random_steps(
+                    min(ckpt_data["steps"]), max(ckpt_data["steps"])
+                )
+                prompt["3"]["inputs"]["cfg"] = get_random_cfg(
+                    min(ckpt_data["cfg"]), max(ckpt_data["cfg"])
+                )
+                prompt["3"]["inputs"]["sampler_name"] = get_random_sampler(
+                    ckpt_data["samplers"]
+                )
+                if user_prompt:
+                    prompt["6"]["inputs"]["text"] = user_prompt + ",".join(
+                        QUALITY_PROMPT_SUFFIX
                     )
-                    prompt["3"]["inputs"]["cfg"] = get_random_cfg(
-                        min(ckpt_data["cfg"]), max(ckpt_data["cfg"])
+                else:
+                    random_prompt = await asyncio.to_thread(get_random_prompt)
+                    prompt["6"]["inputs"]["text"] = random_prompt + ",".join(
+                        QUALITY_PROMPT_SUFFIX
                     )
-                    prompt["3"]["inputs"]["sampler_name"] = get_random_sampler(
-                        ckpt_data["samplers"]
-                    )
-                    if user_prompt:
-                        prompt["6"]["inputs"]["text"] = user_prompt + ",".join(
-                            QUALITY_PROMPT_SUFFIX
-                        )
-                    else:
-                        prompt["6"]["inputs"]["text"] = get_random_prompt() + ",".join(
-                            QUALITY_PROMPT_SUFFIX
-                        )
 
                 images = await self.get_images(prompt)
                 for image_datas in images.values():
                     for image_data in image_datas:
                         file = discord.File(BytesIO(image_data), filename="output.png")
-                        asyncio.create_task(ctx.send(file=file))  # Send asynchronously
+                        _spawn_logged(ctx.send(file=file))
             except Exception as e:
                 logger.error(f"Error generating image: {e}")
                 await self.spack_old(ctx)

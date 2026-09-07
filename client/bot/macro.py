@@ -3,6 +3,7 @@ import sqlite3
 
 from discord.ext import commands
 from bot.constants import MACRO_DB
+from bot.db import open_db
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +11,7 @@ logger = logging.getLogger(__name__)
 class MacroCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db = sqlite3.connect(MACRO_DB)
+        self.db = open_db(MACRO_DB)
         self._create_table()
 
     def _create_table(self):

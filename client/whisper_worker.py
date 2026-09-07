@@ -5,6 +5,7 @@ import time
 import wave
 import uuid
 import logging
+import signal
 import asyncio
 import fnmatch
 import aiohttp
@@ -812,9 +813,22 @@ class WhisperWorker:
                     await asyncio.sleep(0.25)
 
 
+async def _amain(worker: "WhisperWorker"):
+    loop = asyncio.get_running_loop()
+    task = asyncio.create_task(worker.process_audio())
+    # systemd sends SIGTERM; ./kill sends TERM/INT. Cancel the loop instead of
+    # dying mid-job (the inflight entry is then requeued by the idle reaper).
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, task.cancel)
+    try:
+        await task
+    except asyncio.CancelledError:
+        logger.info("whisper worker stopped by signal.")
+
+
 def main():
     worker = WhisperWorker()
-    asyncio.run(worker.process_audio())
+    asyncio.run(_amain(worker))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,3 @@
-import sqlite3
 import datetime
 import random
 import asyncio
@@ -15,6 +14,7 @@ from bot.constants import (
     PRESTIGE_ROLE_ID,
 )
 from bot.config import CHAT_CHANNEL_ID
+from bot.db import open_db
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ class Leveling(commands.Cog):
 
     def init_db(self):
         logger.info("Initializing XP database")
-        with sqlite3.connect(XP_DB) as conn:
+        with open_db(XP_DB) as conn:
             c = conn.cursor()
             c.execute("""
                 CREATE TABLE IF NOT EXISTS user_xp (
@@ -145,7 +145,7 @@ class Leveling(commands.Cog):
         )
 
     def get_user_level(self, user_id: int) -> int | None:
-        with sqlite3.connect(XP_DB) as conn:
+        with open_db(XP_DB) as conn:
             c = conn.cursor()
             c.execute("SELECT level FROM user_xp WHERE user_id = ?", (user_id,))
             level = c.fetchone()
@@ -153,7 +153,7 @@ class Leveling(commands.Cog):
 
     async def get_user_stats(self, ctx, guild=None, channel=None):
         user_id = ctx.author.id
-        with sqlite3.connect(XP_DB) as conn:
+        with open_db(XP_DB) as conn:
             c = conn.cursor()
 
             # Fetch current XP
@@ -176,7 +176,7 @@ class Leveling(commands.Cog):
 
     async def add_xp(self, user_id, amount, guild=None, channel=None):
         """Grant XP. Returns the amount actually granted (0 if cooled down)."""
-        with sqlite3.connect(XP_DB) as conn:
+        with open_db(XP_DB) as conn:
             c = conn.cursor()
 
             # Fetch current XP
@@ -276,7 +276,7 @@ class Leveling(commands.Cog):
     async def profile(self, ctx, user: discord.User = None):
         """Displays the users profile"""
         user = user or ctx.author
-        with sqlite3.connect(XP_DB) as conn:
+        with open_db(XP_DB) as conn:
             c = conn.cursor()
             c.execute(
                 "SELECT xp, level, prestige FROM user_xp WHERE user_id = ?", (user.id,)
@@ -328,7 +328,7 @@ class Leveling(commands.Cog):
     async def rank(self, ctx, user: discord.User = None):
         """Shows the rank of the user"""
         user = user or ctx.author
-        with sqlite3.connect(XP_DB) as conn:
+        with open_db(XP_DB) as conn:
             c = conn.cursor()
             c.execute("SELECT user_id, xp, prestige FROM user_xp ORDER BY xp DESC")
             rows = c.fetchall()
@@ -355,7 +355,7 @@ class Leveling(commands.Cog):
     async def leaderboard(self, ctx, limit: int = 10):
         """Show the level leaderboard"""
         limit = max(1, min(limit, 20))
-        with sqlite3.connect(XP_DB) as conn:
+        with open_db(XP_DB) as conn:
             c = conn.cursor()
             c.execute(
                 "SELECT user_id, xp, level, prestige FROM user_xp ORDER BY xp DESC LIMIT ?",
@@ -370,7 +370,17 @@ class Leveling(commands.Cog):
         medals = ["🥇", "🥈", "🥉"]
         description = ""
         for idx, (user_id, xp, level, prestige) in enumerate(rows, start=1):
-            user = await self.bot.fetch_user(user_id)
+            # Cache-first, API-on-miss, and never crash the command on a
+            # deleted user (same pattern as emoji.py's leaderboard).
+            member = ctx.guild.get_member(user_id) if ctx.guild else None
+            if member is not None:
+                display_name = member.display_name
+            else:
+                try:
+                    user = await self.bot.fetch_user(user_id)
+                    display_name = user.display_name
+                except (discord.NotFound, discord.HTTPException):
+                    display_name = "Unknown user"
             title = get_title_for_level(level)
             flair = get_prestige_flair(prestige)
             prestige_title = get_prestige_title(prestige)
@@ -379,7 +389,7 @@ class Leveling(commands.Cog):
             )
             medal = medals[idx - 1] if idx <= 3 else "🎖️"
 
-            description += f"{medal} **{idx}. {user.display_name} ** — Level {level} ({bold_prestige_title}{title}{flair}) — {xp} XP\n"
+            description += f"{medal} **{idx}. {display_name} ** — Level {level} ({bold_prestige_title}{title}{flair}) — {xp} XP\n"
 
         embed = discord.Embed(
             title="🏆 Server Leaderboard",
@@ -395,7 +405,7 @@ class Leveling(commands.Cog):
         user_id = ctx.author.id
         guild = ctx.guild
         member = guild.get_member(user_id)
-        with sqlite3.connect(XP_DB) as conn:
+        with open_db(XP_DB) as conn:
             c = conn.cursor()
             c.execute(
                 "SELECT xp, level, prestige FROM user_xp WHERE user_id = ?", (user_id,)
@@ -462,7 +472,7 @@ class Leveling(commands.Cog):
             return
 
         # Actually prestige the user
-        with sqlite3.connect(XP_DB) as conn:
+        with open_db(XP_DB) as conn:
             c = conn.cursor()
             c.execute(
                 """

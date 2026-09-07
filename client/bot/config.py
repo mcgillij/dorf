@@ -28,10 +28,24 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") or None
 LLM_HOST = os.getenv("LLM_HOST", "")
 # Discord guild id
 GUILD_ID = os.getenv("GUILD_ID", "")
+
+
+def _require_int(name: str) -> int:
+    """Read an integer env var with a clear error instead of int('') crashing."""
+    raw = os.getenv(name, "")
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(
+            f"{name} is missing or not an integer. "
+            "Set it to the Discord channel id in .env."
+        ) from None
+
+
 # Voice Channel id
-VOICE_CHANNEL_ID = int(os.getenv("VOICE_CHANNEL_ID", ""))
+VOICE_CHANNEL_ID = _require_int("VOICE_CHANNEL_ID")
 # Chat channel id
-CHAT_CHANNEL_ID = int(os.getenv("CHAT_CHANNEL_ID", ""))
+CHAT_CHANNEL_ID = _require_int("CHAT_CHANNEL_ID")
 WHEREAMI = os.getenv("WHEREAMI", "")
 
 

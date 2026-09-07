@@ -1,14 +1,16 @@
 import aiohttp
-import sqlite3
 import logging
 import datetime
 import asyncio
+import re
+from urllib.parse import quote_plus
 from typing import Optional, Tuple, List, Dict
 
 import discord
 from discord.ext import commands, tasks
 from bot.tools.searxng_search import search_source
 from bot.constants import NEWS_DB
+from bot.db import open_db
 from bot.config import CHAT_CHANNEL_ID
 from bot.lms import summarize
 
@@ -18,7 +20,7 @@ logger = logging.getLogger(__name__)
 class NewsAgent(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.db = sqlite3.connect(NEWS_DB)
+        self.db = open_db(NEWS_DB)
         self._initialize_db()
         self.running_tasks = {}  # Track running tasks by ID
         self.check_tasks.start()  # Start the periodic task
@@ -455,6 +457,15 @@ class NewsAgent(commands.Cog):
         """Update the user's location. format: <location>:str <country>:str"""
         user_id = ctx.author.id
         username = ctx.author.name
+        # These strings are later interpolated into the wttr.in URL — reject
+        # anything that could inject query/path characters.
+        allowed = re.compile(r"^[\w\s,.'()\-]+$", re.UNICODE)
+        if not allowed.fullmatch(location) or not allowed.fullmatch(country):
+            await ctx.send(
+                "Location/country may only contain letters, numbers, spaces, "
+                "and , . ' ( ) - _ characters."
+            )
+            return
         cursor = self.db.cursor()
         cursor.execute(
             "INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)",
@@ -496,9 +507,14 @@ class NewsAgent(commands.Cog):
             )
 
         location, country = result
-        async with aiohttp.ClientSession() as session:
+        # quote_plus encodes the space between location and country and
+        # neutralizes any leftovers; explicit timeout instead of aiohttp's
+        # 300s default.
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as session:
             async with session.get(
-                f"https://wttr.in/{location} {country}?format=j1"
+                f"https://wttr.in/{quote_plus(f'{location} {country}')}?format=j1"
             ) as response:
                 if response.status != 200:
                     raise Exception("Failed to fetch weather data.")

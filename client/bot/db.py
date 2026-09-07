@@ -23,13 +23,28 @@ SQLITE_FILES = (
     "quotes.db",
 )
 
+BUSY_TIMEOUT_MS = 5000
+
+
+def open_db(path: str, *, timeout: float = 5.0) -> sqlite3.Connection:
+    """Open a SQLite connection with a per-connection busy timeout.
+
+    journal_mode=WAL is persistent per database file (applied once at startup
+    by ensure_sqlite_pragmas), but busy_timeout is per-connection — without it
+    every short-lived connection fails instantly with "database is locked"
+    when another writer (bot, whisper worker, external Godot client) holds the
+    file. Always open connections through this helper.
+    """
+    conn = sqlite3.connect(path, timeout=timeout)
+    conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+    return conn
+
 
 def ensure_sqlite_pragmas(paths=SQLITE_FILES) -> None:
     for path in paths:
         try:
-            with closing(sqlite3.connect(path, timeout=5)) as conn:
+            with closing(open_db(path)) as conn:
                 mode = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
-                conn.execute("PRAGMA busy_timeout=5000")
                 conn.commit()
             if str(mode).lower() != "wal":
                 logger.warning("sqlite WAL not enabled for %s (mode=%s)", path, mode)
@@ -47,7 +62,7 @@ class SQLiteDB:
     def create_table(self):
         """Create the voice_responses table if it doesn't exist."""
         logger.info("Creating table")
-        with closing(sqlite3.connect(self.db_name)) as conn:
+        with closing(open_db(self.db_name)) as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS voice_responses (
@@ -64,7 +79,7 @@ class SQLiteDB:
         logger.info("Inserting entry into the db")
         # UTC, unambiguous, joinable with the other DBs' timestamps.
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        with closing(sqlite3.connect(self.db_name)) as conn:
+        with closing(open_db(self.db_name)) as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
