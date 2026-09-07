@@ -60,6 +60,11 @@ black = "^26.1"
 ruff = "^0.14"
 pytest = "^8"
 
+[tool.pytest.ini_options]
+# Keep bare `pytest` from collecting scratch files (test_torch.py) and the
+# ROCm smoke script in scripts/.
+testpaths = ["tests"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py313"

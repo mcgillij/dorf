@@ -159,16 +159,21 @@ class Metrics(commands.Cog):
     async def before_aggregate_metrics(self):
         await self.bot.wait_until_ready()
 
-    async def create_plot_and_send(self, ctx, df, title, xlabel, ylabel):
+    async def create_plot_and_send(self, ctx, df, title, xlabel, ylabel, kind=None):
         """Render the plot off the event loop: matplotlib + pandas block for
         hundreds of ms, and this loop drives both bots + the voice pipeline."""
-        return await asyncio.to_thread(self._render_plot, df, title, xlabel, ylabel)
+        return await asyncio.to_thread(
+            self._render_plot, df, title, xlabel, ylabel, kind
+        )
 
-    def _render_plot(self, df, title, xlabel, ylabel):
+    def _render_plot(self, df, title, xlabel, ylabel, kind=None):
         rcParams["font.family"] = "Symbola"
 
         plt.figure(figsize=(10, 6))
-        df.plot()
+        if kind:
+            df.plot(kind=kind)
+        else:
+            df.plot()
         plt.title(title)
         plt.xlabel(xlabel)
         plt.ylabel(ylabel)
@@ -252,26 +257,34 @@ class Metrics(commands.Cog):
 
         top = df.groupby("user_id")["count"].sum().sort_values(ascending=False).head(10)
 
-        # Resolve user_ids to display names (with caching)
+        # Resolve user_ids to display names: cache-first, member cache before
+        # the API, and a deleted user must not crash the command. Rendering
+        # goes through create_plot_and_send like every sibling command.
         display_names = []
         for user_id in top.index:
             if user_id in self.user_cache:
-                name = self.user_cache[user_id]
+                display_names.append(self.user_cache[user_id])
+                continue
+            member = ctx.guild.get_member(user_id) if ctx.guild else None
+            if member is not None:
+                name = member.display_name
             else:
-                user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-                name = user.display_name if hasattr(user, "display_name") else user.name
-                self.user_cache[user_id] = name
+                try:
+                    user = await self.bot.fetch_user(user_id)
+                    name = user.display_name if hasattr(user, "display_name") else user.name
+                except (discord.NotFound, discord.HTTPException):
+                    name = f"Unknown ({user_id})"
             display_names.append(name)
 
+        if len(self.user_cache) > 500:
+            self.user_cache.clear()
+        self.user_cache.update(zip(top.index, display_names))
         top.index = display_names  # Replace user_id with display names
 
-        top.plot(kind="bar", figsize=(10, 6), title="Top Users by Total Activity")
-        plt.tight_layout()
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png")
-        buf.seek(0)
-        plt.close()
-        await ctx.send(file=discord.File(buf, filename="top_users.png"))
+        file = await self.create_plot_and_send(
+            ctx, top, "Top Users by Total Activity", "User", "Count", kind="bar"
+        )
+        await ctx.send(file=file)
 
     @commands.command(name="channel_breakdown")
     async def channel_breakdown(self, ctx):
@@ -309,9 +322,11 @@ class Metrics(commands.Cog):
                 if channel is None:
                     try:
                         channel = await self.bot.fetch_channel(cid)
-                    except discord.NotFound:
+                    except (discord.NotFound, discord.HTTPException):
                         channel = None
                 name = channel.name if channel else f"Unknown ({cid})"
+                if len(self.channel_cache) > 500:
+                    self.channel_cache.clear()
                 self.channel_cache[cid] = name
             display_names.append(name)
 

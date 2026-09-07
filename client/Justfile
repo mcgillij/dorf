@@ -73,6 +73,18 @@ whisper-worker:
 bot:
     poetry run python derfbot.py
 
+# Run the dorf api (the Godot pet's HTTP shim) in the foreground.
+# First time: cd api && poetry install
+@api:
+    cd api && poetry run uvicorn main:app --host 127.0.0.1 --port 8000
+
+# Lint (ruff; same paths as CI)
+@lint:
+    poetry run ruff check bot/ whisper_worker.py derfbot.py tests/
+
+@lint-fix:
+    poetry run ruff check --fix bot/ whisper_worker.py derfbot.py tests/
+
 # Run the bot with auto-restart on *.py changes (dev only; never with `up`)
 bot-watch:
     poetry run watchmedo auto-restart -p "*.py" -R python -- derfbot.py
@@ -96,6 +108,7 @@ restart: stop && up
     @echo -n "model:     "; test -f {{whisper_model}} && echo "OK" || echo "MISSING (run: just model)"
     @echo -n "bot proc:  "; pgrep -af "[d]erfbot.py" > /dev/null && echo "running" || echo "not running"
     @echo -n "worker:    "; pgrep -af "[w]hisper_worker.py" > /dev/null && echo "running" || echo "not running"
+    @echo -n "api:       "; curl -s -o /dev/null --max-time 2 http://127.0.0.1:8000/api/health && echo "OK (:8000)" || echo "FAIL (:8000)"
 
 # Tail the bot log
 logs:
@@ -129,13 +142,14 @@ bot-logs:
 # Install systemd user units (copy + daemon-reload, no enable/start).
 @install-services:
     mkdir -p ~/.config/systemd/user
-    cp deploy/systemd/derfbot.service deploy/systemd/derf-whisper-worker.service ~/.config/systemd/user/
+    cp deploy/systemd/derfbot.service deploy/systemd/derf-whisper-worker.service deploy/systemd/dorf-api.service ~/.config/systemd/user/
     systemctl --user daemon-reload
-    @echo "installed (not enabled). enable with: systemctl --user enable --now derfbot.service derf-whisper-worker.service"
+    @echo "installed (not enabled). enable with: systemctl --user enable --now derfbot.service derf-whisper-worker.service dorf-api.service"
 
 # Remove the systemd user units (disable + delete)
 @uninstall-services:
     systemctl --user disable --now derfbot.service 2>/dev/null || true
     systemctl --user disable --now derf-whisper-worker.service 2>/dev/null || true
-    rm -f ~/.config/systemd/user/derfbot.service ~/.config/systemd/user/derf-whisper-worker.service
+    systemctl --user disable --now dorf-api.service 2>/dev/null || true
+    rm -f ~/.config/systemd/user/derfbot.service ~/.config/systemd/user/derf-whisper-worker.service ~/.config/systemd/user/dorf-api.service
     systemctl --user daemon-reload

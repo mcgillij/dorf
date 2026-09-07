@@ -1,0 +1,22 @@
+# dorf-api.service — user unit for the FastAPI shim the Godot pet talks to.
+# OPT-IN (replaces ./startup's api launch). Install with `just
+# install-services`, enable with:
+#   systemctl --user enable --now dorf-api.service
+# Requires a one-time `cd api && poetry install` (uvicorn comes from the
+# fastapi[standard] extra). Reads api/.env relative to WorkingDirectory.
+
+[Unit]
+Description=dorf api (Godot pet <-> redis shim)
+After=network-online.target
+
+[Service]
+WorkingDirectory=/home/j/dorf/api
+# poetry shim (not the hashed venv path — that breaks on any re-lock).
+ExecStart=/home/j/.pyenv/shims/poetry run uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

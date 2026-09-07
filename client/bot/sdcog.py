@@ -26,9 +26,9 @@ from bot.constants import (
 )
 from bot.utilities import get_random_image_path
 
-# dir for input images
-INPUT_IMAGE_DIR = Path("/home/j/ComfyUI/input")
-INPUT_IMAGE_DIR.mkdir(exist_ok=True)
+# dir for ComfyUI input images; env-driven (was a hardcoded /home/j path).
+COMFY_INPUT_DIR = Path(os.getenv("COMFY_INPUT_DIR", "/home/j/ComfyUI/input"))
+COMFY_INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 WAIFU_PROMPTS = "waifu_prompts.json"
 _cached_prompts = ""
@@ -66,7 +66,9 @@ def _read_json(path):
 class ImageGen(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.server_address = "127.0.0.1:8188"
+        # Config-driven so this works on any machine (was hardcoded to
+        # /home/j/ComfyUI + 127.0.0.1:8188).
+        self.server_address = os.getenv("COMFYUI_HOST", "127.0.0.1:8188")
         self.client_id = str(uuid.uuid4())
         self.emoji = "🎨"
         self.photo_emoji = "📷"
@@ -404,14 +406,13 @@ class ImageGen(commands.Cog):
             # Bounded waits: a wedged ComfyUI used to hang the sole queue
             # processor forever (no recv timeout at all).
             recv_timeout_s = float(os.getenv("COMFY_RECV_TIMEOUT_S", "300"))
-            overall_deadline = time.monotonic() + float(
-                os.getenv("COMFY_OVERALL_TIMEOUT_S", "900")
-            )
+            overall_timeout_s = float(os.getenv("COMFY_OVERALL_TIMEOUT_S", "900"))
+            overall_deadline = time.monotonic() + overall_timeout_s
 
             while True:
                 if time.monotonic() > overall_deadline:
                     raise TimeoutError(
-                        f"ComfyUI job did not finish within {int(overall_deadline - time.monotonic() + 900)}s"
+                        f"ComfyUI job did not finish within {int(overall_timeout_s)}s"
                     )
                 logging.info("Waiting for WebSocket message...")
                 try:
@@ -707,7 +708,7 @@ def process_image_data(image_data):
 
 def save_image_to_input_dir(image_data):
     with tempfile.NamedTemporaryFile(
-        dir=INPUT_IMAGE_DIR, suffix=".png", delete=False
+        dir=COMFY_INPUT_DIR, suffix=".png", delete=False
     ) as tmp_file:
         tmp_file.write(image_data)
         file_path = Path(tmp_file.name)

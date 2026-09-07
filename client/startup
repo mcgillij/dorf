@@ -43,11 +43,24 @@ if ! curl -s -o /dev/null --max-time 2 http://127.0.0.1:8080/; then
   # never LAN-reachable), and passing explicit --host/--port makes this
   # build fail to bind ("couldn't bind to server socket"). --ipc=host
   # stays: ROCm fails to allocate GPU memory without it.
+  # --restart unless-stopped: a host reboot used to leave STT down while
+  # redis (compose) came back on its own.
   docker run -d --name derf-whisper --network=host \
+    --restart unless-stopped \
     --device=/dev/kfd --device=/dev/dri --group-add=video --ipc=host \
     -v "$PWD/models:/models" \
     ghcr.io/ggerganov/whisper.cpp:main \
     /app/build/bin/whisper-server -m /models/ggml-base.en.bin
+fi
+
+# dorf api (FastAPI shim the Godot pet talks to; :8000). Previously
+# unmanaged — the pet silently froze after any reboot.
+if ! live_pid "[u]vicorn.*main:app"; then
+  nohup setsid bash -c 'cd api && poetry run uvicorn main:app --host 127.0.0.1 --port 8000' \
+    >> api.nohup.log 2>&1 < /dev/null &
+  echo "started dorf api (pid $!)"
+else
+  echo "dorf api already running; skipping launch"
 fi
 
 # STT worker (consumes whisper_queue, routes transcripts to the bots).
@@ -60,8 +73,9 @@ else
   echo "whisper_worker already running; skipping launch"
 fi
 
-# The bot — exactly ONE process. Do not also run watcher.sh: two processes
-# fight over the Discord token and tear each other's voice sinks down.
+# The bot — exactly ONE process. Do not also run a file-watcher variant:
+# two processes fight over the Discord token and tear each other's voice
+# sinks down.
 if ! live_pid "[d]erfbot\.py"; then
   nohup setsid poetry run python derfbot.py >> bot.nohup.log 2>&1 < /dev/null &
   echo "started derfbot (pid $!)"

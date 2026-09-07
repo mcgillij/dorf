@@ -1,9 +1,10 @@
 import logging
+import time
 
 import dice
 import discord
 from discord.ext import commands
-from bot.utilities import get_random_image_path
+from bot.utilities import get_random_image_path, split_message
 from bot.constants import FRIEREN_DIR
 from rapidfuzz import fuzz
 
@@ -14,6 +15,8 @@ class MiscCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.bot.launch_time = discord.utils.utcnow()
+        # channel_id -> last "chup" reply timestamp (per-channel rate limit)
+        self._last_chup_reply = {}
 
     @commands.command(name="list", aliases=["commands"])
     async def list_commands(self, ctx):
@@ -23,7 +26,11 @@ class MiscCog(commands.Cog):
             params = ", ".join(cmd.clean_params.keys())
             aliases = ", ".join(cmd.aliases) if cmd.aliases else "None"
             command_details.append(f"!{cmd.name}({params}) - Aliases: [{aliases}]")
-        await ctx.send("Available commands:\n" + "\n".join(command_details))
+        # One message per 2000 chars: !list used to exceed Discord's limit
+        # and raise once the command count grew.
+        text = "Available commands:\n" + "\n".join(command_details)
+        for chunk in split_message(text):
+            await ctx.send(chunk)
 
     @commands.command()
     async def uptime(self, ctx):
@@ -66,10 +73,17 @@ class MiscCog(commands.Cog):
 
         content = message.content.strip()
 
-        # Check for variations of "chup" using fuzzy matching
-        if fuzz.partial_ratio(content.lower(), "chup") > 80:
-            await message.channel.send("NO U CHUP!")
-            return
+        # "chup" retort: fuzz.partial_ratio fires on any message that merely
+        # contains a near-substring, so long unrelated messages triggered it.
+        # Only short messages count, and reply at most once per 30s/channel.
+        if len(content) <= 25 and fuzz.partial_ratio(content.lower(), "chup") > 85:
+            now = time.monotonic()
+            if now - self._last_chup_reply.get(message.channel.id, 0.0) > 30:
+                self._last_chup_reply[message.channel.id] = now
+                if len(self._last_chup_reply) > 100:
+                    self._last_chup_reply.clear()
+                await message.channel.send("NO U CHUP!")
+                return
 
     @commands.command()
     async def marne(self, ctx):

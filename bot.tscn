@@ -46,7 +46,6 @@ layout_mode = 3
 anchors_preset = 0
 script = ExtResource("1_6e6p7")
 http = NodePath("AwaitableHTTPRequest")
-input_window = ExtResource("2_4qqjq")
 
 [node name="AwaitableHTTPRequest" type="HTTPRequest" parent="."]
 script = ExtResource("2_noa4f")
@@ -67,6 +66,3 @@ script = ExtResource("7_evtps")
 [node name="Timer" type="Timer" parent="."]
 wait_time = 6.0
 one_shot = true
-
-[connection signal="request_completed" from="AwaitableHTTPRequest" to="." method="_on_awaitable_http_request_request_completed"]
-[connection signal="request_finished" from="AwaitableHTTPRequest" to="." method="_on_awaitable_http_request_request_finished"]

@@ -2,9 +2,11 @@ output
 user_audio
 .env
 nohup*
+*.nohup.log
 __pycache__/
 *.pyc
 *.db
+.ruff_cache/
 spack
 frieren
 # runtime data read by bot/sdcog.py — must ship with a fresh clone

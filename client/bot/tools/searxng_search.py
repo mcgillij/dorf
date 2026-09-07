@@ -81,10 +81,13 @@ async def search_internet(q: str, callback=None) -> List[Dict]:
 
                         # Store full content in ChromaDB (upsert: re-searching
                         # a stored URL must not raise DuplicateIDError and
-                        # abort the whole search flow).
+                        # abort the whole search flow). ChromaDB runs
+                        # embedding + sqlite internally — blocking; offload
+                        # like the sibling chroma.py calls.
                         if extracted_content:
                             try:
-                                collection.upsert(
+                                await asyncio.to_thread(
+                                    collection.upsert,
                                     documents=[extracted_content],
                                     metadatas=[{"source_url": url, "title": title}],
                                     ids=[url],  # Using URL as a unique ID

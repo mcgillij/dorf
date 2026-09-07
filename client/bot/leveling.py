@@ -179,6 +179,12 @@ class Leveling(commands.Cog):
         with open_db(XP_DB) as conn:
             c = conn.cursor()
 
+            # BEGIN IMMEDIATE takes the write lock up front, so concurrent
+            # grants serialize: the second one re-reads the fresh
+            # last_message_ts and sees the cooldown. The old check-then-write
+            # was a TOCTOU race (two near-simultaneous events both passed).
+            c.execute("BEGIN IMMEDIATE")
+
             # Fetch current XP
             c.execute(
                 "SELECT xp, level, last_message_ts, prestige FROM user_xp WHERE user_id = ?",
@@ -400,6 +406,7 @@ class Leveling(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="prestige")
+    @commands.guild_only()
     async def prestige(self, ctx):
         """Allows a user to prestige if they meet the requirements. (level50)"""
         user_id = ctx.author.id

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import redis
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 
 # Load the api/.env that lives next to this file so the service is not
 # CWD-sensitive (running `uvicorn main:app` from the repo root previously
@@ -17,6 +17,10 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") or None
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+
+# Optional shared secret: the Godot client sends it as the X-Dorf-Token
+# header (DORF_API_TOKEN env there). Unset in api/.env disables the check.
+DORF_API_TOKEN = os.getenv("DORF_API_TOKEN") or None
 
 RESPONSE_QUEUE = "response_queue"
 RESPONSE_KEY_PREFIX = "response"
@@ -30,6 +34,16 @@ redis_client = redis.Redis(
 )
 
 app = FastAPI()
+
+
+async def require_token(request: Request) -> None:
+    """Reject requests without the shared token when one is configured.
+
+    Without this, any local process could inject prompts that get spoken in
+    a Discord voice channel and posted in chat.
+    """
+    if DORF_API_TOKEN and request.headers.get("x-dorf-token") != DORF_API_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid or missing token")
 
 
 @app.get("/api/health")
@@ -48,7 +62,7 @@ def generate_unique_id() -> str:
 
 
 @app.post("/api/process_query")
-async def process_query(query: dict):
+async def process_query(query: dict, _: None = Depends(require_token)):
     text = query.get("query")
     if not text or not isinstance(text, str):
         raise HTTPException(status_code=422, detail="Missing 'query' string field")
@@ -59,7 +73,7 @@ async def process_query(query: dict):
 
 
 @app.post("/api/fetch_response")
-async def get_result(unique_id: dict) -> dict:
+async def get_result(unique_id: dict, _: None = Depends(require_token)) -> dict:
     key_id = unique_id.get("unique_id")
     if not key_id or not isinstance(key_id, str):
         raise HTTPException(status_code=422, detail="Missing 'unique_id' string field")

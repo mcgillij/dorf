@@ -1,0 +1,10 @@
+# Lint only. The codebase is NOT ruff-format-clean (30 files would be
+# reformatted), so a format hook would rewrite everything — enable
+# ruff-format deliberately as its own commit if that's ever wanted.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(bot/|whisper_worker\.py|derfbot\.py|tests/)

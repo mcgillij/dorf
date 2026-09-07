@@ -34,8 +34,12 @@ class PollCog(commands.Cog):
 
         active_polls[poll_id]["message_id"] = message.id
 
-        # Start background task
-        ctx.bot.loop.create_task(close_poll_after_delay(ctx, poll_id, view))
+        # Keep the task referenced (active_polls entry is popped on close) —
+        # an unreferenced task can be garbage-collected mid-sleep. asyncio.
+        # create_task also drops the deprecated bot.loop accessor.
+        active_polls[poll_id]["closer"] = asyncio.create_task(
+            close_poll_after_delay(ctx, poll_id, view)
+        )
 
 
 async def close_poll_after_delay(ctx, poll_id, view):

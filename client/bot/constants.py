@@ -78,7 +78,9 @@ FRIEREN_DIR = "frieren/"
 
 # Leveling
 XP_DB = "xp_users.db"
-XP_COOLDOWN_SECONDS = 10  # 1 minute cooldown between XP gains per user
+# Cooldown between XP gains per user (seconds). Note: the value is 10s —
+# the old "# 1 minute" comment was stale.
+XP_COOLDOWN_SECONDS = 10
 
 def level_threshold(lvl: int) -> int:
     return 5 * (lvl**2) + 50 * lvl + 100

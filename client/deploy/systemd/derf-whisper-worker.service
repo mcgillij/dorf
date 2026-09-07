@@ -12,7 +12,9 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=/home/j/dorf/client
-ExecStart=/home/j/.cache/pypoetry/virtualenvs/client-aWSgf0eG-py3.13/bin/python /home/j/dorf/client/whisper_worker.py
+# poetry shim, not the hashed venv path (breaks on any re-lock).
+ExecStart=/home/j/.pyenv/shims/poetry run python whisper_worker.py
+NoNewPrivileges=true
 Restart=on-failure
 RestartSec=5
 
