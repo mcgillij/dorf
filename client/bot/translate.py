@@ -13,14 +13,28 @@ class Translate(commands.Cog):
     @commands.command(name="translate_indian", aliases=["tr", "archa"])
     async def translate_to_english(self, ctx, *, text: str):
         """Translates from Marathi to English"""
-        translated_text = await translate_to_english(text)
+        try:
+            translated_text = await translate_to_english(text)
+        except Exception:
+            logger.exception("Translation command failed")
+            await ctx.send(
+                "Translation failed — LM Studio may be down or misconfigured."
+            )
+            return
         # send the message back to the channel
         await ctx.send(f"{translated_text}")
 
     @commands.command(name="translate_english", aliases=["tra", "rarcha"])
     async def translate_to_indian(self, ctx, *, text: str):
         """Translates from English to Marathi"""
-        translated_text = await translate_to_indian(text)
+        try:
+            translated_text = await translate_to_indian(text)
+        except Exception:
+            logger.exception("Translation command failed")
+            await ctx.send(
+                "Translation failed — LM Studio may be down or misconfigured."
+            )
+            return
         # send the message back to the channel
         await ctx.send(f"{translated_text}")
 

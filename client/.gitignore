@@ -2,10 +2,17 @@ output
 user_audio
 .env
 nohup*
+__pycache__/
+*.pyc
 *.db
 spack
 frieren
 *.json
+# runtime data read by bot/sdcog.py — must ship with a fresh clone
+!waifu_prompts.json
+!war_waifus.json
+!checkpoints.json
+!input_spack.json
 prompts/
 docs/
 models/

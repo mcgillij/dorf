@@ -15,16 +15,19 @@ whisper_container := "derf-whisper"
 install:
     poetry install
 
-# Reinstall the manually-managed TTS + torch stack. Poetry can't own these:
-# misaki >=0.7.15 still declares python <3.13, and letting pip resolve
-# kokoro's deps would downgrade numpy (breaking pandas) and pull a CUDA
-# torch. The venv shadows the pyenv system torch (which is currently a
-# corrupted half-upgraded 2.14-dev build) with a clean CPU build.
+# Reinstall the TTS + torch stack. Poetry can't own these: misaki still
+# declares python <3.13, and letting pip resolve kokoro's deps would
+# downgrade numpy (breaking pandas) and pull a CUDA torch. The canonical
+# installer is scripts/install_kokoro_py313_rocm.sh (system ROCm torch,
+# pinned versions, spaCy model, synthesis smoke test) — see also
+# README.md and pyproject.toml's tts group comment.
+# Runs: bash scripts/install_kokoro_py313_rocm.sh
 tts-deps:
-    poetry run pip install --no-deps kokoro==0.7.16 misaki==0.7.4
-    poetry run pip install --ignore-installed torch --index-url https://download.pytorch.org/whl/cpu
-    poetry run pip install --no-deps --ignore-installed torchvision --index-url https://download.pytorch.org/whl/cpu
-    poetry run pip install regex num2words phonemizer-fork espeakng-loader spacy scipy transformers==4.48.0
+    bash scripts/install_kokoro_py313_rocm.sh
+
+# Run the unit test suite
+test:
+    poetry run python -m pytest tests/ -q
 
 # Pull redis + whisper.cpp images
 pull:
@@ -118,3 +121,21 @@ worker-logs:
 # Tail the background bot nohup log
 bot-logs:
     tail -f bot.nohup.log
+
+# Opt-in: do NOT enable while ./startup (nohup) is running — systemd
+# auto-restart would fight ./kill. Enabling these replaces the nohup
+# workflow. Afterwards enable with:
+#   systemctl --user enable --now derfbot.service derf-whisper-worker.service
+# Install systemd user units (copy + daemon-reload, no enable/start).
+@install-services:
+    mkdir -p ~/.config/systemd/user
+    cp deploy/systemd/derfbot.service deploy/systemd/derf-whisper-worker.service ~/.config/systemd/user/
+    systemctl --user daemon-reload
+    @echo "installed (not enabled). enable with: systemctl --user enable --now derfbot.service derf-whisper-worker.service"
+
+# Remove the systemd user units (disable + delete)
+@uninstall-services:
+    systemctl --user disable --now derfbot.service 2>/dev/null || true
+    systemctl --user disable --now derf-whisper-worker.service 2>/dev/null || true
+    rm -f ~/.config/systemd/user/derfbot.service ~/.config/systemd/user/derf-whisper-worker.service
+    systemctl --user daemon-reload

@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install tooling
+        run: pip install ruff pytest
+      - name: Lint
+        run: ruff check bot/ whisper_worker.py derfbot.py tests/
+      - name: Tests
+        run: python -m pytest tests/ -q
+        env:
+          # tests import bot.config, which hard-fails without tokens; CI only
+          # needs the imports to succeed, not real credentials.
+          DISCORD_BOT_TOKEN: ci-placeholder
+          NIC_DISCORD_BOT_TOKEN: ci-placeholder
+          LOCAL_LLM_KEY: ci-placeholder

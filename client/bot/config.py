@@ -22,6 +22,7 @@ if not DISCORD_BOT_TOKEN:
 # Configure Redis
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") or None
 
 # Constants for LLM API interaction
 LLM_HOST = os.getenv("LLM_HOST", "")

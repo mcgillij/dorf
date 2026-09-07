@@ -11,6 +11,11 @@ from bot.chroma import RAGContextBuilder, collection
 rag_builder = RAGContextBuilder(collection, search_internet, similarity_threshold=0.5)
 logger = logging.getLogger(__name__)
 
+
+class LLMConfigError(RuntimeError):
+    """Raised when the LM Studio model's prompt template is misconfigured (e.g. missing bosToken)."""
+
+
 _LLM_CALL_TIMEOUT_S = 120
 _ACT_CALL_TIMEOUT_S = 300
 
@@ -53,10 +58,12 @@ async def wrap_model_to_indian_translate(
     except Exception as e:
         logger.error(f"Error in wrap_model_to_indian_translate: {e}")
         if "bosToken" in str(e) or "ValidationError" in str(e):
-            logger.error(
+            logger.exception(
                 "Model configuration error: The LMStudio model is missing required prompt template fields."
             )
-            return "Error: Model configuration issue. Please check your LMStudio model configuration."
+            raise LLMConfigError(
+                "Model configuration issue: the LM Studio model's prompt template is missing required fields. Please check your LM Studio model configuration."
+            ) from e
         raise
 
 
@@ -83,10 +90,12 @@ async def wrap_model_qa_insult(model) -> str:
     except Exception as e:
         logger.error(f"Error in wrap_model_qa_insult: {e}")
         if "bosToken" in str(e) or "ValidationError" in str(e):
-            logger.error(
+            logger.exception(
                 "Model configuration error: The LMStudio model is missing required prompt template fields."
             )
-            return "Error: Model configuration issue. Please check your LMStudio model configuration."
+            raise LLMConfigError(
+                "Model configuration issue: the LM Studio model's prompt template is missing required fields. Please check your LM Studio model configuration."
+            ) from e
         raise
 
 
@@ -115,10 +124,12 @@ async def wrap_model_from_indian_translate(
     except Exception as e:
         logger.error(f"Error in wrap_model_from_indian_translate: {e}")
         if "bosToken" in str(e) or "ValidationError" in str(e):
-            logger.error(
+            logger.exception(
                 "Model configuration error: The LMStudio model is missing required prompt template fields."
             )
-            return "Error: Model configuration issue. Please check your LMStudio model configuration."
+            raise LLMConfigError(
+                "Model configuration issue: the LM Studio model's prompt template is missing required fields. Please check your LM Studio model configuration."
+            ) from e
         raise
 
 
@@ -145,10 +156,12 @@ async def wrap_model(model, query, on_message=None, callback=None) -> str:
     except Exception as e:
         logger.error(f"Error in wrap_model: {e}")
         if "bosToken" in str(e) or "ValidationError" in str(e):
-            logger.error(
+            logger.exception(
                 "Model configuration error: The LMStudio model is missing required prompt template fields. Please check the model configuration in LMStudio."
             )
-            return "Error: Model configuration issue. The model's prompt template is missing required fields (bosToken). Please check your LMStudio model configuration."
+            raise LLMConfigError(
+                "Model configuration issue: the model's prompt template is missing required fields (bosToken). Please check your LM Studio model configuration."
+            ) from e
         raise
 
 
@@ -185,10 +198,12 @@ async def wrap_model_act(model, query, tools, on_message=None, callback=None) ->
     except Exception as e:
         logger.error(f"Error in wrap_model_act: {e}")
         if "bosToken" in str(e) or "ValidationError" in str(e):
-            logger.error(
+            logger.exception(
                 "Model configuration error: The LMStudio model is missing required prompt template fields. Please check the model configuration in LMStudio."
             )
-            return "Error: Model configuration issue. The model's prompt template is missing required fields (bosToken). Please check your LMStudio model configuration."
+            raise LLMConfigError(
+                "Model configuration issue: the model's prompt template is missing required fields (bosToken). Please check your LM Studio model configuration."
+            ) from e
         raise
 
 
@@ -202,8 +217,8 @@ async def qa_insult() -> str:
         # callback=callback,
     )
     content = extract_content(response)
-    # logger.info(f"********************************  Content: {content}")
-    # logger.info(f"********************************  Response: {response}")
+    if not content:
+        raise RuntimeError("qa_insult: empty model response")
     return content
 
 
@@ -218,8 +233,8 @@ async def translate_to_indian(query: str, callback=None) -> str:
         # callback=callback,
     )
     content = extract_content(response)
-    # logger.info(f"********************************  Content: {content}")
-    # logger.info(f"********************************  Response: {response}")
+    if not content:
+        raise RuntimeError("translate: empty model response")
     return content
 
 
@@ -234,8 +249,8 @@ async def translate_to_english(query: str, callback=None) -> str:
         # callback=callback,
     )
     content = extract_content(response)
-    # logger.info(f"********************************  Content: {content}")
-    # logger.info(f"********************************  Response: {response}")
+    if not content:
+        raise RuntimeError("translate: empty model response")
     return content
 
 
@@ -250,8 +265,8 @@ async def summarize(query: str, callback) -> str:
         # callback=callback,
     )
     content = extract_content(response)
-    # logger.info(f"********************************  Content: {content}")
-    # logger.info(f"********************************  Response: {response}")
+    if not content:
+        raise RuntimeError("summarize: empty model response")
     return content
 
 
@@ -293,6 +308,8 @@ Query:
         content = extract_content(response)
         logger.info(f"********************************  Content: {content}")
         logger.info(f"********************************  Response: {response}")
+        if not content:
+            raise RuntimeError("search: empty model response")
         return content
     else:
         logger.info("No good RAG matches, falling back to live search.")
@@ -342,7 +359,9 @@ def extract_content(prediction_result):
         prediction_result: The PredictionResult object returned from OpenAI API
 
     Returns:
-        str: The extracted content text
+        str or None: The extracted content text, or None if nothing
+        parseable is found. Callers must treat None as a failure, not
+        as user-facing content.
     """
     # If it's already an object with content attribute
     if hasattr(prediction_result, "content"):
@@ -361,4 +380,4 @@ def extract_content(prediction_result):
             return prediction_result.choices[0].text
 
     # If none of the above methods work
-    return "Could not extract content from the prediction result"
+    return None

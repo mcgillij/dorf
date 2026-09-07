@@ -228,51 +228,11 @@ def get_random_image_path(directory):
         return None
 
 
-async def replace_userids_with_username(ctx, text: str) -> str:
-    logger.info("Replacing user IDs with usernames")
-    logger.debug(f"Original text: {text}")
-
-    async def replace_match(match: re.Match) -> str:
-        user_id = int(match.group(1))
-        if ctx.guild is None:
-            logger.warning("Guild is None, cannot resolve user ID")
-            return "@unknown-user"
-
-        user = ctx.guild.get_member(user_id)
-        if user:
-            return f"<@{user.id}>"  # Properly formatted Discord mention
-        logger.warning(f"User ID {user_id} not found in guild")
-        return "@unknown-user"
-
-    async def replace_pattern(pattern: str, text: str) -> str:
-        matches = list(re.finditer(pattern, text))
-        if not matches:
-            return text
-
-        # Build the new text progressively
-        new_text = []
-        last_end = 0
-        for match in matches:
-            new_text.append(text[last_end : match.start()])
-            new_text.append(await replace_match(match))
-            last_end = match.end()
-        new_text.append(text[last_end:])
-        return "".join(new_text)
-
-    patterns = [r"<@(\d+)>", r"@(\d+)", r"(\d+):", r"(\d+),"]
-    for pattern in patterns:
-        text = await replace_pattern(pattern, text)
-
-    logger.debug(f"Processed text: {text}")
-    return text
-
-
 async def preprocess_mentions(ctx, message: str) -> tuple[str, dict]:
     """
     Replace Discord mentions with placeholders and return the mapping.
     Returns: (processed_message, mention_map)
     """
-    import re
 
     mention_map = {}
     placeholder_counter = 1
@@ -303,7 +263,6 @@ async def postprocess_mentions(ctx, response: str, mention_map: dict) -> str:
         response = response.replace(placeholder, mention)
 
     # Then, replace any @IDs that are in the map
-    import re
 
     def replace_id(match):
         user_id = match.group(1)
@@ -330,23 +289,6 @@ def generate_unique_id(ctx, message: str) -> str:
     response key and mention map. uuid4 has no such collision.
     """
     return uuid.uuid4().hex
-
-
-async def poll_redis_for_key(key: str, timeout: float = 0.5) -> str:
-    """Polls Redis for a key and returns its value when found.
-
-    Note: this is intentionally unbounded (used by legacy flows). For bounded waits,
-    use `poll_redis_for_key_with_timeout`.
-    """
-
-    while True:
-        response = await asyncio.to_thread(redis_client.get, key)
-        # Redis returns None when missing; empty strings are valid values and must
-        # not cause an infinite wait.
-        if response is not None:
-            await asyncio.to_thread(redis_client.delete, key)
-            return response.decode("utf-8") if isinstance(response, bytes) else response
-        await asyncio.sleep(timeout)
 
 
 async def poll_redis_for_key_with_timeout(
@@ -472,13 +414,6 @@ class LLMClient:
                 await asyncio.sleep(1.0)
 
         raise last_error or LLMRequestError("unknown error")
-
-
-def split_text(text):  # This shouldn't be needed anymore since moving mostly to kokoro
-    """
-    Splits the text into chunks using newlines (\n) or periods (.) as delimiters.
-    """
-    return [chunk.strip() for chunk in re.split(r"[.\n]", text) if chunk.strip()]
 
 
 async def start_capture(guild, channel, bot, *, force_restart: bool = False):

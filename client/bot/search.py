@@ -54,7 +54,12 @@ class SearchCog(commands.Cog):
             if param:
                 enqueue_message(ctx.channel, param)
 
-        results = await search_with_tool(message, callback)
+        try:
+            results = await search_with_tool(message, callback)
+        except Exception:
+            logger.exception("Search command failed")
+            await ctx.send("Search failed — LM Studio may be down.")
+            return
         for msg in split_message(results):
             enqueue_message(ctx.channel, msg)
 

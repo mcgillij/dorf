@@ -70,7 +70,8 @@ class ImageGen(commands.Cog):
             logger.info(f"Processing task of type: {task_type}, {data}")
             try:
                 if statemanager:
-                    statemanager.update_state_thinking()
+                    # sync sqlite on the shared loop stalls the voice pipeline
+                    await asyncio.to_thread(statemanager.update_state_thinking)
                 if task_type == "spack":
                     ctx = data["ctx"]
                     await self.process_image_request(ctx)
@@ -145,7 +146,7 @@ class ImageGen(commands.Cog):
                 logger.error(f"Error processing unified queue task: {e}")
             finally:
                 if statemanager:
-                    statemanager.update_state_idle()
+                    await asyncio.to_thread(statemanager.update_state_idle)
                 self.unified_queue.task_done()
 
     @commands.Cog.listener()

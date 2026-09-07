@@ -74,11 +74,3 @@ class SQLiteDB:
                 (user_id, message.strip(), timestamp),
             )
             conn.commit()
-
-    def get_all_entries(self):
-        """Retrieve all entries from the table."""
-        with closing(sqlite3.connect(self.db_name)) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM voice_responses")
-            rows = cursor.fetchall()
-            return rows

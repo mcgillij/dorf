@@ -38,9 +38,13 @@ fi
 #     /bin/sh -c "cd /app/models && ./download-ggml-model.sh base.en && cp ggml-base.en.bin /models/"
 if ! curl -s -o /dev/null --max-time 2 http://127.0.0.1:8080/; then
   docker rm -f derf-whisper 2>/dev/null
+  # Hardened vs the original: SYS_PTRACE and seccomp=unconfined dropped.
+  # --network=host stays: the server binds 127.0.0.1 by default (verified
+  # never LAN-reachable), and passing explicit --host/--port makes this
+  # build fail to bind ("couldn't bind to server socket"). --ipc=host
+  # stays: ROCm fails to allocate GPU memory without it.
   docker run -d --name derf-whisper --network=host \
     --device=/dev/kfd --device=/dev/dri --group-add=video --ipc=host \
-    --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
     -v "$PWD/models:/models" \
     ghcr.io/ggerganov/whisper.cpp:main \
     /app/build/bin/whisper-server -m /models/ggml-base.en.bin

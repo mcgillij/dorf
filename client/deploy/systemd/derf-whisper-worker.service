@@ -1,0 +1,20 @@
+# derf-whisper-worker.service — user unit for the STT queue consumer.
+# OPT-IN: do NOT enable while ./startup (nohup) is running. ./startup's
+# guards prevent double-launch of itself, but systemd auto-restart would
+# fight ./kill (it would keep respawning the worker after a kill). Enabling
+# this unit replaces the nohup workflow entirely. Install with
+# `just install-services`, enable with:
+#   systemctl --user enable --now derf-whisper-worker.service
+
+[Unit]
+Description=whisper STT queue worker (poetry venv, client stack)
+After=network-online.target
+
+[Service]
+WorkingDirectory=/home/j/dorf/client
+ExecStart=/home/j/.cache/pypoetry/virtualenvs/client-aWSgf0eG-py3.13/bin/python /home/j/dorf/client/whisper_worker.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

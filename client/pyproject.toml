@@ -58,6 +58,7 @@ spacy = { version = "^3.8.0", python = "<3.13" }
 watchdog = "^6.0.0"
 black = "^26.1"
 ruff = "^0.14"
+pytest = "^8"
 
 [tool.ruff]
 line-length = 100
