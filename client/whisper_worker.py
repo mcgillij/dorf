@@ -37,7 +37,11 @@ return 0
 # worker's reaper would steal in-flight jobs from the live one and produce
 # duplicate transcripts/responses (double speech).
 _WORKER_LOCK_KEY = "whisper_worker_lock"
-_WORKER_LOCK_TTL_S = 30
+# Generous TTL: the idle loop refreshes every ~10s (brpoplpush timeout),
+# so 90s survives several missed cycles. The original 30s TTL raced the
+# 30s brpoplpush block — on an empty queue the first refresh ran at the
+# exact moment of expiry and always lost (lock lost -> worker exit).
+_WORKER_LOCK_TTL_S = 90
 
 # Refresh the lock TTL only if we still own it (never steal someone else's).
 _LOCK_REFRESH_LUA = """
@@ -310,6 +314,9 @@ class WhisperWorker:
         if not await asyncio.to_thread(redis_client.ping):
             raise ConnectionError("Failed to connect to Redis.")
         await self._acquire_singleton_lock()
+        # Refresh immediately: the acquire TTL clock is already running and
+        # the first loop iteration may block for the full brpoplpush timeout.
+        await self._refresh_singleton_lock()
         await self._requeue_stranded_inflight()
         try:
             qlen = await asyncio.to_thread(redis_client.llen, WHISPER_QUEUE)
@@ -336,12 +343,15 @@ class WhisperWorker:
                 raw_value = None
                 try:
                     # Use an inflight list so jobs are not silently lost if the worker
-                    # crashes or Whisper errors out.
+                    # crashes or Whisper errors out. 10s block: the idle branch
+                    # (lock refresh, sweep, reap) must run far more often than
+                    # the lock TTL — a 30s block raced the 30s TTL and starved
+                    # the refresh on every quiet period.
                     raw_value = await asyncio.to_thread(
                         redis_client.brpoplpush,
                         WHISPER_QUEUE,
                         WHISPER_INFLIGHT_QUEUE,
-                        30,
+                        10,
                     )
 
                     if not raw_value:

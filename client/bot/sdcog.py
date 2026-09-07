@@ -20,7 +20,6 @@ import urllib.request
 import urllib.parse
 
 from PIL import Image
-from io import BytesIO
 
 from bot.constants import (
     SPACK_DIR,
@@ -84,7 +83,7 @@ class ImageGen(commands.Cog):
                     character = data["character"]
                     await self.process_dnd_image_request(ctx, character)
                 elif task_type == "draw":
-                    logger.info(f"Processing draw image request")
+                    logger.info("Processing draw image request")
                     ctx = data["ctx"]
                     image_data = data["image_data"]
                     user_prompt = data["prompt"]
@@ -103,7 +102,7 @@ class ImageGen(commands.Cog):
                         # remove it once get_images has finished.
                         cleanup_temp_input(file_path)
                 elif task_type == "photo":
-                    logger.info(f"Processing photo image request")
+                    logger.info("Processing photo image request")
                     ctx = data["ctx"]
                     image_data = data["image_data"]
                     user_prompt = data["prompt"]

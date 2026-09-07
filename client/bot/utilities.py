@@ -4,7 +4,6 @@ import uuid
 from random import randint, choice
 import aiohttp
 import asyncio
-import traceback
 import logging
 import time
 
@@ -237,13 +236,13 @@ async def replace_userids_with_username(ctx, text: str) -> str:
         user_id = int(match.group(1))
         if ctx.guild is None:
             logger.warning("Guild is None, cannot resolve user ID")
-            return f"@unknown-user"
+            return "@unknown-user"
 
         user = ctx.guild.get_member(user_id)
         if user:
             return f"<@{user.id}>"  # Properly formatted Discord mention
         logger.warning(f"User ID {user_id} not found in guild")
-        return f"@unknown-user"
+        return "@unknown-user"
 
     async def replace_pattern(pattern: str, text: str) -> str:
         matches = list(re.finditer(pattern, text))

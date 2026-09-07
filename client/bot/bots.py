@@ -204,7 +204,7 @@ class BaseBot(commands.Bot):
             logger.info(f"User {member} joined a voice channel.")
             if member.guild.voice_client:
                 # If bot is already connected, maybe do something
-                logger.info(f"Bot already connected, ensuring capture is active.")
+                logger.info("Bot already connected, ensuring capture is active.")
                 await start_capture(member.guild, after.channel, self)
         elif not after.channel and before.channel:
             # User left voice entirely: drop their capture state (buffer, lock,

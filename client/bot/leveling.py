@@ -7,8 +7,6 @@ import logging
 import discord
 from discord.ext import commands
 
-logger = logging.getLogger(__name__)
-
 from bot.constants import (
     XP_DB,
     XP_COOLDOWN_SECONDS,
@@ -17,6 +15,8 @@ from bot.constants import (
     PRESTIGE_ROLE_ID,
 )
 from bot.config import CHAT_CHANNEL_ID
+
+logger = logging.getLogger(__name__)
 
 
 async def send_fancy_levelup(destination, user, level, new_title=None, next_title=None):
@@ -466,7 +466,7 @@ class Leveling(commands.Cog):
             c = conn.cursor()
             c.execute(
                 """
-                UPDATE user_xp 
+                UPDATE user_xp
                 SET xp = 0, level = 1, prestige = prestige + 1
                 WHERE user_id = ?
                 """,

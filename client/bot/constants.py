@@ -80,7 +80,11 @@ FRIEREN_DIR = "frieren/"
 XP_DB = "xp_users.db"
 XP_COOLDOWN_SECONDS = 10  # 1 minute cooldown between XP gains per user
 
-LEVEL_THRESHOLDS = lambda lvl: 5 * (lvl**2) + 50 * lvl + 100
+def level_threshold(lvl: int) -> int:
+    return 5 * (lvl**2) + 50 * lvl + 100
+
+
+LEVEL_THRESHOLDS = level_threshold
 
 LEVEL_ROLE_MAPPING = {
     0: 1364048765727801344,  # Wanderer

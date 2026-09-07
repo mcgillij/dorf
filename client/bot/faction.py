@@ -368,7 +368,7 @@ class FactionCog(commands.Cog):
 
             # Get faction scores
             c.execute("""
-                SELECT factions.id, factions.name, factions.symbol, factions.color, 
+                SELECT factions.id, factions.name, factions.symbol, factions.color,
                     SUM(faction_scores.usage_count) as score
                 FROM factions
                 LEFT JOIN faction_scores ON factions.id = faction_scores.faction_id
@@ -379,7 +379,7 @@ class FactionCog(commands.Cog):
 
             # Get faction members
             c.execute("""
-                SELECT user_id, faction_id 
+                SELECT user_id, faction_id
                 FROM user_factions
             """)
             all_members = c.fetchall()

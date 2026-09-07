@@ -5,20 +5,16 @@ import os
 import uuid
 
 from bot.utilities import (
-    split_message,
     generate_unique_id,
     poll_redis_for_key_with_timeout,
-    replace_userids_with_username,
     preprocess_mentions,
     postprocess_mentions,
 )
 from bot.redis_client import redis_client
 from bot.pipelines.unified import RequestContext, deliver_existing_response
 from bot.constants import (
-    LONG_RESPONSE_THRESHOLD,
     DERF_SUMMARIZER_QUEUE,
     NIC_SUMMARIZER_QUEUE,
-    SUMMARIZER_RESPONSE_KEY,
     DERF_RESPONSE_KEY_PREFIX,
     NIC_RESPONSE_KEY_PREFIX,
     DERF_RESPONSE_KEY,

@@ -68,7 +68,10 @@ class NewsAgent(commands.Cog):
         sleep_s = interval * 60
 
         async def task_runner():
+            # Sleep first: running immediately re-posted the full digest on
+            # every restart even if it ran minutes before shutdown.
             while True:
+                await asyncio.sleep(sleep_s)
                 try:
                     await self.execute_task_logic(task_id, task_name)
                 except asyncio.CancelledError:
@@ -76,8 +79,7 @@ class NewsAgent(commands.Cog):
                 except Exception:
                     logger.exception(
                         "Task run failed (id=%s, name=%s)", task_id, task_name
-                    )
-                await asyncio.sleep(sleep_s)  # Wait for the next interval
+                    )  # Wait for the next interval
 
         # Start the task and store it in the running_tasks dictionary
         task = asyncio.create_task(task_runner())
@@ -430,7 +432,7 @@ class NewsAgent(commands.Cog):
             await ctx.send("No preferences found. Please set your preferences first.")
             return
 
-        await ctx.send(f"Searching for news for you based on your preferences.")
+        await ctx.send("Searching for news for you based on your preferences.")
 
         # Iterate over sources and topics from user preferences
         results = []

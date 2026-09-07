@@ -1,6 +1,5 @@
 import asyncio
 import json
-import traceback
 import logging
 from bot.constants import (
     DERF_SUMMARIZER_QUEUE,

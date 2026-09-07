@@ -57,7 +57,18 @@ spacy = { version = "^3.8.0", python = "<3.13" }
 [tool.poetry.group.dev.dependencies]
 watchdog = "^6.0.0"
 black = "^26.1"
+ruff = "^0.14"
 
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+exclude = ["scripts", "dndchars"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+    "E501", # long lines — existing codebase style
+]
 
 [build-system]
 requires = ["poetry-core"]

@@ -4,22 +4,33 @@
 # file (vi derfbot.py, less, etc.) are never matched.
 set -uo pipefail
 
+# pgrep matches zombies too, and a zombie never dies by signal — which used
+# to wedge kill's wait loop and make startup skip relaunching forever.
+live_pids() {
+  local pat="$1" p state
+  for p in $(pgrep -f "$pat" 2>/dev/null || true); do
+    state=$(awk '{print $3}' "/proc/$p/stat" 2>/dev/null)
+    [ -n "$state" ] && [ "$state" != "Z" ] && echo "$p"
+  done
+}
+
 stop_procs() {
   local pattern="$1"
   local pids
-  pids=$(pgrep -f "$pattern" 2>/dev/null || true)
+  pids=$(live_pids "$pattern")
   if [ -z "$pids" ]; then
     return 0
   fi
+  echo "stopping ($pattern): $pids"
   # shellcheck disable=SC2086
   kill $pids 2>/dev/null || true
   # Wait up to 10s for a clean exit, then escalate.
   for _ in $(seq 1 20); do
-    pids=$(pgrep -f "$pattern" 2>/dev/null || true)
+    pids=$(live_pids "$pattern")
     [ -z "$pids" ] && break
     sleep 0.5
   done
-  pids=$(pgrep -f "$pattern" 2>/dev/null || true)
+  pids=$(live_pids "$pattern")
   if [ -n "$pids" ]; then
     echo "escalating to SIGKILL for: $pids"
     # shellcheck disable=SC2086
@@ -33,3 +44,4 @@ stop_procs "[p]ython.*whisper_worker\.py"
 # Orphaned log followers from startup (docker compose/docker logs -f).
 pkill -f "[c]ompose logs -f.*redis" 2>/dev/null || true
 pkill -f "[d]ocker logs -f.*derf-whisper" 2>/dev/null || true
+

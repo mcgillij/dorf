@@ -295,7 +295,7 @@ Query:
         logger.info(f"********************************  Response: {response}")
         return content
     else:
-        logger.info(f"No good RAG matches, falling back to live search.")
+        logger.info("No good RAG matches, falling back to live search.")
 
         final_query = (
             query

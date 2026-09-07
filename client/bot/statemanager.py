@@ -4,9 +4,10 @@ from contextlib import closing
 
 from discord.ext import commands
 
-logger = logging.getLogger(__name__)
 from bot.config import AvatarState
 from bot.constants import AVATAR_STATE_DB_PATH
+
+logger = logging.getLogger(__name__)
 
 
 def _initialize_database(db_path=AVATAR_STATE_DB_PATH):

@@ -55,7 +55,10 @@ class Insulter(commands.Cog):
         sleep_s = interval * 60
 
         async def task_runner():
+            # Sleep first: running immediately re-fired the task on every
+            # restart even if it ran minutes before shutdown.
             while True:
+                await asyncio.sleep(sleep_s)
                 try:
                     await self.execute_task_logic(task_id, task_name)
                 except asyncio.CancelledError:
@@ -63,8 +66,7 @@ class Insulter(commands.Cog):
                 except Exception:
                     logger.exception(
                         "Task run failed (id=%s, name=%s)", task_id, task_name
-                    )
-                await asyncio.sleep(sleep_s)  # Wait for the next interval
+                    )  # Wait for the next interval
 
         # Start the task and store it in the running_tasks dictionary
         task = asyncio.create_task(task_runner())
