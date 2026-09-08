@@ -102,6 +102,35 @@ class FactionCog(commands.Cog):
                 "INSERT OR IGNORE INTO war_state (id, started_at) VALUES (1, NULL)"
             )
 
+            # Self-heal orphaned rows: past reseeds advanced the factions
+            # autoincrement (1..3 -> 4..6 -> ...) while user_factions/
+            # faction_scores kept the old ids — scores went invisible and
+            # factioninfo crashed. Prune rows whose faction no longer
+            # exists; users re-assign naturally on their next emoji.
+            c.execute(
+                "DELETE FROM user_factions WHERE faction_id NOT IN "
+                "(SELECT id FROM factions)"
+            )
+            c.execute(
+                "DELETE FROM faction_scores WHERE faction_id NOT IN "
+                "(SELECT id FROM factions)"
+            )
+
+            # war_history attribution is recoverable: every seeding path
+            # (init_db seed + reset_factions) assigns ids in DEFAULT_FACTIONS
+            # order, so id N's name is DEFAULT_FACTIONS[(N-1) % len]. Remap
+            # instead of pruning — these rows are past-war scores.
+            _case = " ".join(
+                f"WHEN {i} THEN (SELECT id FROM factions WHERE name = ?)"
+                for i in range(len(DEFAULT_FACTIONS))
+            )
+            c.execute(
+                "UPDATE war_history SET faction_id = CASE (faction_id - 1) % "
+                f"{len(DEFAULT_FACTIONS)} {_case} END WHERE faction_id IS NOT NULL "
+                "AND faction_id NOT IN (SELECT id FROM factions)",
+                [f["name"] for f in DEFAULT_FACTIONS],
+            )
+
             conn.commit()
 
     async def cog_unload(self):
@@ -176,17 +205,33 @@ class FactionCog(commands.Cog):
             chosen_faction = random.choice(least_filled)
 
             c.execute(
-                "INSERT INTO user_factions (user_id, faction_id) VALUES (?, ?)",
+                "INSERT INTO user_factions (user_id, faction_id) VALUES (?, ?) "
+                # Upsert heals a stale row (dead faction id) instead of
+                # dying on the user_id PRIMARY KEY.
+                "ON CONFLICT(user_id) DO UPDATE SET faction_id = excluded.faction_id",
                 (user_id, chosen_faction),
             )
             conn.commit()
             return chosen_faction
 
     def get_user_faction(self, user_id):
+        """The user's faction id — only if that faction still exists.
+
+        reset_factions reseeds factions with fresh autoincrement ids; a
+        pre-reset user_factions row then points at a dead id, which sent
+        every emoji score to an orphan faction (invisible to warstatus)
+        and crashed factioninfo on the None lookup. The JOIN returns None
+        for stale rows so the caller re-assigns."""
         with open_db(FACTION_DB) as conn:
             c = conn.cursor()
             c.execute(
-                "SELECT faction_id FROM user_factions WHERE user_id = ?", (user_id,)
+                """
+                SELECT uf.faction_id
+                FROM user_factions uf
+                JOIN factions f ON f.id = uf.faction_id
+                WHERE uf.user_id = ?
+                """,
+                (user_id,),
             )
             result = c.fetchone()
             return result[0] if result else None
@@ -281,7 +326,13 @@ class FactionCog(commands.Cog):
             c.execute(
                 "SELECT name, symbol, color FROM factions WHERE id = ?", (faction_id,)
             )
-            name, symbol, color = c.fetchone()
+            row = c.fetchone()
+            if not row:
+                # Dead faction id (shouldn't happen — get_user_faction
+                # validates the join) but never crash the command on it.
+                await ctx.send("Your faction data was stale — try again.")
+                return
+            name, symbol, color = row
 
             # Join date
             c.execute(
@@ -466,7 +517,10 @@ class FactionCog(commands.Cog):
             await ctx.send("No faction scores yet!")
             return
 
+        # A fresh war has an empty faction_scores table; the LEFT JOIN then
+        # SUMs to NULL (not 0) and f"{None:,}" killed the whole command.
         leader_name, leader_symbol, leader_score = faction_rows[0]
+        leader_score = leader_score or 0
 
         embed = discord.Embed(
             title="⚔️ War Status",
@@ -615,10 +669,14 @@ class FactionCog(commands.Cog):
                 c.execute("DELETE FROM faction_scores")
                 c.execute("DELETE FROM user_factions")
                 c.execute("DELETE FROM factions")
-                for faction in DEFAULT_FACTIONS:
+                # Explicit ids: a plain INSERT would advance the
+                # autoincrement every reset (1..3 -> 4..6 -> ...), so any
+                # stale reference drifted further from the live table.
+                for idx, faction in enumerate(DEFAULT_FACTIONS, start=1):
                     c.execute(
-                        "INSERT INTO factions (name, symbol, color) VALUES (?, ?, ?)",
-                        (faction["name"], faction["symbol"], faction["color"]),
+                        "INSERT INTO factions (id, name, symbol, color) "
+                        "VALUES (?, ?, ?, ?)",
+                        (idx, faction["name"], faction["symbol"], faction["color"]),
                     )
                 c.execute(
                     "UPDATE war_state SET warning_24h_sent = 0, "

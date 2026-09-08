@@ -7,6 +7,29 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+DISCORD_MSG_LIMIT = 2000
+
+
+def chunk_discord_content(content: str, limit: int = 1900) -> list[str]:
+    """Split text into Discord-safe chunks (hard 2000-char API limit,
+    error 50035). Prefer paragraph breaks so the story stays readable; a
+    paragraph-less wall of text gets hard-split instead of dropped."""
+    content = content.strip()
+    if len(content) <= limit:
+        return [content] if content else []
+    chunks = []
+    while len(content) > limit:
+        split_at = content.rfind("\n\n", 0, limit)
+        if split_at < limit // 2:  # no sensible paragraph break up front
+            split_at = content.rfind("\n", 0, limit)
+        if split_at < limit // 2:
+            split_at = limit
+        chunks.append(content[:split_at].strip())
+        content = content[split_at:].strip()
+    if content:
+        chunks.append(content)
+    return chunks
+
 
 class Adventure(commands.Cog):
     def __init__(self, bot):
@@ -34,9 +57,14 @@ class Adventure(commands.Cog):
         return await asyncio.to_thread(_run)
 
     async def send_adventure_message(self, ctx, content, add_reactions=True):
-        """Helper to send a message and optionally add reaction options."""
-        message = await ctx.send(content)
-        if add_reactions:
+        """Helper to send a message and optionally add reaction options.
+
+        The bard's narrative regularly exceeds Discord's 2000-char limit;
+        send it in chunks and react only to the last one."""
+        message = None
+        for part in chunk_discord_content(content):
+            message = await ctx.send(part)
+        if add_reactions and message is not None:
             for emoji in ["🏃‍♂️", "🥷", "⚔️"]:
                 await message.add_reaction(emoji)
         return message
@@ -155,7 +183,8 @@ class Adventure(commands.Cog):
                 final_story = await self._respond(summary_chat)
 
                 await ctx.send(end_text)
-                await ctx.send(final_story)
+                for part in chunk_discord_content(final_story):
+                    await ctx.send(part)
 
                 # Award XP (add_xp returns the amount actually granted —
                 # the chat cooldown can silently swallow the reward)
