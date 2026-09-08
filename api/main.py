@@ -7,6 +7,7 @@ from pathlib import Path
 import redis
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 
 # Load the api/.env that lives next to this file so the service is not
 # CWD-sensitive (running `uvicorn main:app` from the repo root previously
@@ -85,7 +86,13 @@ async def process_query(query: dict, _: None = Depends(require_token)):
     if not text or not isinstance(text, str):
         raise HTTPException(status_code=422, detail="Missing 'query' string field")
     unique_id = generate_unique_id()
-    payload = json.dumps({"unique_id": unique_id, "message": text})
+    # source: "godot" is the pet's only entry point; the response worker uses
+    # it to synthesize local speech (pet_tts:{uid}) instead of relying on the
+    # command-side Discord voice path. Absence of the tag = Discord text
+    # command, behavior unchanged.
+    payload = json.dumps(
+        {"unique_id": unique_id, "message": text, "source": "godot"}
+    )
     await asyncio.to_thread(redis_client.lpush, RESPONSE_QUEUE, payload)
     return {"unique_id": unique_id}
 
@@ -96,6 +103,29 @@ async def get_result(unique_id: dict, _: None = Depends(require_token)) -> dict:
     if not key_id or not isinstance(key_id, str):
         raise HTTPException(status_code=422, detail="Missing 'unique_id' string field")
     return await poll_redis_for_key(key_id)
+
+
+@app.get("/api/tts/{unique_id}")
+async def get_tts(unique_id: str, _: None = Depends(require_token)):
+    """Serve the pet's local speech for a query (written by the response
+    worker after the LLM).
+
+    The pet_tts:{uid} value is an absolute wav path — the api process reads
+    it from disk. "failed" / missing / file-gone all 404 so the pet treats
+    it as text-only and gives up fast.
+    """
+    try:
+        wav_path = await asyncio.to_thread(
+            redis_client.get, f"pet_tts:{unique_id}"
+        )
+    except Exception:
+        wav_path = None
+    if not wav_path or wav_path == "failed":
+        raise HTTPException(status_code=404, detail="No TTS for this query")
+    path = Path(wav_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No TTS for this query")
+    return FileResponse(path, media_type="audio/wav")
 
 
 async def poll_redis_for_key(

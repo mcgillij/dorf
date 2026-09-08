@@ -34,3 +34,14 @@ def get_provider(name: str = "") -> TTSProvider:
     _INSTANCES[selected] = PROVIDER_CLASSES[selected]()
     logger.info("tts.provider_selected name=%s", selected)
     return _INSTANCES[selected]
+
+
+def synthesize(text: str, voice: str, output_wav: str) -> None:
+    """Blocking one-call wrapper: resolve the provider, then synthesize.
+
+    Run this inside a worker thread (to_thread / executor) — the lazy
+    backend import happens on the calling thread, so it must not be the
+    event loop: resolving get_provider() in loop code would import torch
+    on the bot's main loop on the first use.
+    """
+    get_provider().synthesize(text, voice, output_wav)

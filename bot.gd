@@ -20,6 +20,15 @@ var time_accumulator: float = 0.0
 # doesn't snap the pet back to idle.
 var current_state := "idle"
 
+# Local pet speech: after a text response lands, the pet polls the api for
+# the tts wav the response worker synthesized (source "godot" → pet_tts:{uid}).
+const TTS_POLL_INTERVAL_S := 2.0
+const TTS_BUDGET_S := 30.0  # synthesis takes seconds; give it room
+
+var _tts_player: AudioStreamPlayer
+# Bumps per fetch; a newer query invalidates an older poll loop.
+var _tts_fetch_seq := 0
+
 func _ready() -> void:
 	# Endpoint/token come from the environment so the pet can point at a
 	# remote api (exported builds no longer hardcode localhost). :8100 —
@@ -29,6 +38,10 @@ func _ready() -> void:
 		fastapi_endpoint = "http://localhost:8100"
 	fastapi_endpoint = fastapi_endpoint.trim_suffix("/")
 	api_token = OS.get_environment("DORF_API_TOKEN")
+	# Speech player for pet queries — built in code, no scene edit needed;
+	# reuse swaps .stream and plays again.
+	_tts_player = AudioStreamPlayer.new()
+	add_child(_tts_player)
 	connect_signals()
 	$Timer.timeout.connect(back_to_idle)
 	$Timer.start()
@@ -109,8 +122,45 @@ func _on_input_window_send(query: String) -> void:
 		return
 	# Surface the answer in the pet's window — it used to be write-only.
 	$TextInputWindow.show_response(str(text_response["response"]))
+	_fetch_and_play_tts(unique_id)  # fire-and-forget: text never blocks on audio
 	dorf.play(&"talking")
 	$Timer.start()  # Restart the timer for next poll
+
+func _sleep_s(seconds: float) -> void:
+	await get_tree().create_timer(seconds).timeout
+
+func _fetch_and_play_tts(unique_id: String) -> void:
+	# Poll GET /api/tts/{uid} until the response worker's synth lands
+	# (404 while pending), then play it locally. Text is already on screen;
+	# a dead TTS backend just means silence — never an error surfaced.
+	_tts_fetch_seq += 1
+	var seq := _tts_fetch_seq
+	var url := fastapi_endpoint + "/api/tts/" + unique_id
+	var deadline_ms := Time.get_ticks_msec() + int(TTS_BUDGET_S * 1000.0)
+	while Time.get_ticks_msec() < deadline_ms:
+		if seq != _tts_fetch_seq:
+			return  # a newer query owns the fetch channel
+		# Share the query http node (state polls have their own); wait out
+		# an in-flight request instead of failing the poll.
+		if not await _wait_http_ready(http, 2.0):
+			await _sleep_s(TTS_POLL_INTERVAL_S)
+			continue
+		var resp := await http.async_request(url, _api_headers())
+		if resp.success() and resp.status_ok():
+			_play_tts_bytes(resp.bytes)
+			return
+		await _sleep_s(TTS_POLL_INTERVAL_S)
+
+func _play_tts_bytes(bytes: PackedByteArray) -> void:
+	# PCM_16 wav from the provider contract; the buffer parse reads the
+	# RIFF header (mix rate / channels) itself.
+	if bytes.is_empty():
+		return
+	var stream := AudioStreamWAV.load_from_buffer(bytes)
+	if stream == null:
+		return
+	_tts_player.stream = stream
+	_tts_player.play()
 
 func do_http_get_unique_id(unique_id: String) -> Dictionary:
 	if not await _wait_http_ready(http):

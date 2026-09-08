@@ -1,3 +1,5 @@
+import os
+
 from bot.config import WHEREAMI
 
 # Define constants for queue names
@@ -35,7 +37,10 @@ VOICE_CONTROL_NIC_QUEUE = "voice_control_nic_queue"
 VOICE_STOP_KEY_PREFIX = "voice_stop"
 
 # TTS Voice Settings
-TTS_ENGINE = "kokoro"  # or use the mimic3 docker container
+# Backend selection: registry key in bot/tts (PROVIDER_CLASSES). Unknown names
+# fail loudly with the available list when the first consumer calls
+# get_provider().
+TTS_PROVIDER = os.getenv("TTS_PROVIDER", "kokoro")
 TTS_VOICE = "am_adam"
 TTS_VOICE_NICOLE = "af_nicole"
 
