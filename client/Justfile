@@ -3,7 +3,10 @@
 
 set shell := ["bash", "-uc"]
 
-whisper_image := "ghcr.io/ggerganov/whisper.cpp:main"
+# Pinned by digest: the floating :main tag silently changed STT behavior
+# once. To bump: docker pull the tag, read `docker image inspect <tag>
+# --format '{{json .RepoDigests}}'`, and update this line.
+whisper_image := "ghcr.io/ggerganov/whisper.cpp@sha256:13d0e7c873c59a262dca621b57ad28de40e9927ac883d936dfd8459142c90db4"
 whisper_model := "models/ggml-base.en.bin"
 whisper_container := "derf-whisper"
 
@@ -28,6 +31,10 @@ tts-deps:
 # Run the unit test suite
 test:
     poetry run python -m pytest tests/ -q
+
+# Run the api contract tests (first time: cd api && poetry install)
+test-api:
+    cd ../api && poetry run python -m pytest tests/ -q
 
 # Pull redis + whisper.cpp images
 pull:
@@ -74,9 +81,10 @@ bot:
     poetry run python derfbot.py
 
 # Run the dorf api (the Godot pet's HTTP shim) in the foreground.
+# :8100 — :8000 is taken by the godot-ai MCP server in this environment.
 # First time: cd api && poetry install
 @api:
-    cd api && poetry run uvicorn main:app --host 127.0.0.1 --port 8000
+    cd ../api && poetry run uvicorn main:app --host 127.0.0.1 --port 8100
 
 # Lint (ruff; same paths as CI)
 @lint:
@@ -97,9 +105,10 @@ up:
 stop:
     ./kill
 
-# Restart the full stack
+# Restart the full stack. Returns immediately — it does NOT tail logs (the
+# old `tail -f` made `just restart` look hung; follow with `just up-logs`).
 restart: stop && up
-    tail -f bot.log
+    @echo "stack restarted. follow with: just up-logs"
 
 # Sanity check the stack: redis, whisper server, model file
 @check:
@@ -108,7 +117,7 @@ restart: stop && up
     @echo -n "model:     "; test -f {{whisper_model}} && echo "OK" || echo "MISSING (run: just model)"
     @echo -n "bot proc:  "; pgrep -af "[d]erfbot.py" > /dev/null && echo "running" || echo "not running"
     @echo -n "worker:    "; pgrep -af "[w]hisper_worker.py" > /dev/null && echo "running" || echo "not running"
-    @echo -n "api:       "; curl -s -o /dev/null --max-time 2 http://127.0.0.1:8000/api/health && echo "OK (:8000)" || echo "FAIL (:8000)"
+    @echo -n "api:       "; curl -s -o /dev/null --max-time 2 http://127.0.0.1:8100/api/health && echo "OK (:8100)" || echo "FAIL (:8100)"
 
 # Tail the bot log
 logs:

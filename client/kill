@@ -40,7 +40,10 @@ stop_procs() {
 
 stop_procs "[p]ython.*derfbot\.py"
 stop_procs "[p]ython.*whisper_worker\.py"
-stop_procs "[u]vicorn.*main:app"
+# Space after "uvicorn" is deliberate: `uvicorn main:app` (ours) must NOT
+# match other services' `uvicorn app.main:app` (a container process is
+# visible from the host and matches a looser pattern).
+stop_procs "[u]vicorn main:app"
 
 # Orphaned log followers from startup (docker compose/docker logs -f).
 pkill -f "[c]ompose logs -f.*redis" 2>/dev/null || true

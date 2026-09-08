@@ -50,3 +50,26 @@ jobs:
           AUTH_TOKEN: ci-placeholder
           VOICE_CHANNEL_ID: "0"
           CHAT_CHANNEL_ID: "0"
+
+  api-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install poetry
+        run: pipx install poetry
+      - name: Cache poetry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry
+          key: poetry-api-${{ runner.os }}-${{ hashFiles('api/poetry.lock') }}
+          restore-keys: poetry-api-${{ runner.os }}-
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      - name: Contract tests
+        run: poetry run python -m pytest tests/ -q

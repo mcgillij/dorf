@@ -102,6 +102,10 @@ class ImageGen(commands.Cog):
                 if statemanager:
                     # sync sqlite on the shared loop stalls the voice pipeline
                     await asyncio.to_thread(statemanager.update_state_thinking)
+                # Actually generating now (ComfyUI can take minutes) — the
+                # pet mirrors the "drawing" state (thinking frames).
+                if statemanager:
+                    await asyncio.to_thread(statemanager.update_state_drawing)
                 if task_type == "spack":
                     ctx = data["ctx"]
                     await self.process_image_request(ctx)

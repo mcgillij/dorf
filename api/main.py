@@ -24,6 +24,10 @@ DORF_API_TOKEN = os.getenv("DORF_API_TOKEN") or None
 
 RESPONSE_QUEUE = "response_queue"
 RESPONSE_KEY_PREFIX = "response"
+AVATAR_STATE_KEY = "avatar_state"
+# How long fetch_response waits for the bot's LLM answer. Env-tunable so
+# contract tests can shrink it.
+RESPONSE_MAX_WAIT_S = float(os.getenv("RESPONSE_MAX_WAIT_S", "125"))
 
 redis_client = redis.Redis(
     host=REDIS_HOST,
@@ -44,6 +48,20 @@ async def require_token(request: Request) -> None:
     """
     if DORF_API_TOKEN and request.headers.get("x-dorf-token") != DORF_API_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid or missing token")
+
+
+@app.get("/api/avatar_state")
+async def avatar_state() -> dict:
+    """Current avatar state for the Godot pet (written by the bot to Redis).
+
+    Falls back to "idle" when the key is missing (bot down / TTL expired) or
+    Redis is unreachable — the pet must never error on a failed read.
+    """
+    try:
+        state = await asyncio.to_thread(redis_client.get, AVATAR_STATE_KEY)
+    except Exception:
+        state = None
+    return {"state": state if state else "idle"}
 
 
 @app.get("/api/health")
@@ -84,7 +102,7 @@ async def poll_redis_for_key(
     key: str,
     *,
     poll_interval_s: float = 0.5,
-    max_wait_s: float = 125.0,
+    max_wait_s: float | None = None,
 ) -> dict:
     """Poll `response:{key}` for up to max_wait_s, then 504.
 
@@ -92,6 +110,8 @@ async def poll_redis_for_key(
     response key carries a 3600s TTL, but an unbounded wait left Godot clients
     hanging forever whenever the response worker was down.
     """
+    if max_wait_s is None:
+        max_wait_s = RESPONSE_MAX_WAIT_S
     redis_key = f"{RESPONSE_KEY_PREFIX}:{key}"
     deadline = asyncio.get_running_loop().time() + max_wait_s
     while True:

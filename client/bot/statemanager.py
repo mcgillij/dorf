@@ -6,8 +6,15 @@ from discord.ext import commands
 from bot.config import AvatarState
 from bot.constants import AVATAR_STATE_DB_PATH
 from bot.db import open_db
+from bot.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
+
+# Redis transport for the Godot pet (read via GET /api/avatar_state). The
+# SQLite file remains as diagnostics/history; the old shared-file handshake
+# with the pet is retired — the pet polls the api over HTTP instead.
+AVATAR_STATE_KEY = "avatar_state"
+AVATAR_STATE_TTL_S = 3600
 
 
 def _initialize_database(db_path=AVATAR_STATE_DB_PATH):
@@ -40,10 +47,16 @@ def _initialize_database(db_path=AVATAR_STATE_DB_PATH):
 
 
 def update_state(state: AvatarState):
-    """Updates the avatar state in the database."""
+    """Updates the avatar state (Redis for the pet, SQLite for history)."""
     # getattr() also accepts plain strings ("talking") alongside AvatarState
     # members, so standalone callers don't have to build the enum.
     state_value = getattr(state, "value", state)
+    try:
+        redis_client.set(AVATAR_STATE_KEY, state_value, ex=AVATAR_STATE_TTL_S)
+    except Exception:
+        # Redis down must never take the bot down; the pet just freezes on
+        # its last state until the next successful write.
+        logger.warning("avatar_state redis write failed", exc_info=True)
     with closing(open_db(AVATAR_STATE_DB_PATH)) as conn:
         cursor = conn.cursor()
         cursor.execute("PRAGMA busy_timeout=5000")

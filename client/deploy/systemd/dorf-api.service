@@ -12,7 +12,7 @@ After=network-online.target
 [Service]
 WorkingDirectory=/home/j/dorf/api
 # poetry shim (not the hashed venv path — that breaks on any re-lock).
-ExecStart=/home/j/.pyenv/shims/poetry run uvicorn main:app --host 127.0.0.1 --port 8000
+ExecStart=/home/j/.pyenv/shims/poetry run uvicorn main:app --host 127.0.0.1 --port 8100
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true

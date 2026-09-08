@@ -182,6 +182,36 @@ class BaseBot(commands.Bot):
     async def on_ready(self):
         logger.info(f"{self.name} is ready.")
 
+    async def on_command_error(self, ctx, error):
+        """Global handler: 55 commands used to leak tracebacks to the log
+        with zero user-visible feedback. Per-command handlers still get the
+        error first (re-raised ones land here)."""
+        if isinstance(error, commands.CommandNotFound):
+            return  # prefix typos are noise, not errors
+        if isinstance(error, commands.CommandOnCooldown):
+            await ctx.send(f"Slow down — try again in {error.retry_after:.0f}s")
+            return
+        if isinstance(error, commands.NoPrivateMessage):
+            await ctx.send("That command only works in a server.")
+            return
+        if isinstance(error, commands.CheckFailure):
+            await ctx.send("You don't have permission to use that here.")
+            return
+        if isinstance(error, commands.UserInputError):
+            await ctx.send(f"Bad arguments: {error}")
+            return
+        if isinstance(error, commands.CommandInvokeError):
+            error = error.original
+        logger.error(
+            "command %s failed: %s", ctx.command, error, exc_info=error
+        )
+        try:
+            await ctx.send(
+                "Something went wrong running that command — it's been logged."
+            )
+        except discord.HTTPException:
+            pass  # channel gone / DMs closed; the log line above is the record
+
     async def handle_voice_state_update(self, member, before, after):
         logger.info(
             f"{self.name}: Voice update for {member} | {before.channel} -> {after.channel}"

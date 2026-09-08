@@ -9,7 +9,7 @@ import signal
 import asyncio
 import fnmatch
 import aiohttp
-from bot.db import SQLiteDB, ensure_sqlite_pragmas
+from bot.db import SQLiteDB, ensure_sqlite_pragmas, sweep_voice_responses
 from bot.redis_client import redis_client
 from bot.constants import (
     WHISPER_QUEUE,
@@ -422,14 +422,34 @@ class WhisperWorker:
                             last_idle_log = now
                         # Periodic retention sweep: wavs from unrouted,
                         # failed and dead-lettered jobs are never unlinked
-                        # on the job paths, so remove stale ones here. A
-                        # sweep failure must never kill the worker loop.
+                        # on the job paths, so remove stale ones here. Also
+                        # prunes transcript history (voice_responses.db) and
+                        # the chroma article store. A sweep failure must
+                        # never kill the worker loop.
                         if now - last_sweep >= 3600.0:
                             last_sweep = now
                             try:
                                 await self.sweep_old_audio()
                             except Exception:
                                 logger.exception("whisper.audio_sweep_failed")
+                            try:
+                                pruned = await asyncio.to_thread(
+                                    sweep_voice_responses, "voice_responses.db", 30
+                                )
+                                if pruned:
+                                    logger.info(
+                                        "whisper.voice_responses_sweep pruned=%s", pruned
+                                    )
+                            except Exception:
+                                logger.exception("whisper.voice_responses_sweep_failed")
+                            try:
+                                # Lazy import: chromadb is heavy and the STT
+                                # worker otherwise never needs it.
+                                from bot.chroma import sweep_old_documents
+
+                                await sweep_old_documents(max_age_days=90)
+                            except Exception:
+                                logger.exception("whisper.chroma_sweep_failed")
                         continue
 
                     # Value contains JSON metadata.

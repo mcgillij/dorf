@@ -1,32 +1,28 @@
 import aiohttp
 import logging
 import datetime
-import asyncio
 import re
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote_plus
-from typing import Optional, Tuple, List, Dict
 
 import discord
-from discord.ext import commands, tasks
-from bot.tools.searxng_search import search_source
-from bot.constants import NEWS_DB
-from bot.db import open_db
+from discord.ext import commands
+
 from bot.config import CHAT_CHANNEL_ID
+from bot.constants import NEWS_DB
 from bot.lms import summarize
+from bot.scheduled_base import ScheduledTaskCog
+from bot.tools.searxng_search import search_source
 
 logger = logging.getLogger(__name__)
 
 
-class NewsAgent(commands.Cog):
+class NewsAgent(ScheduledTaskCog):
     def __init__(self, bot):
-        self.bot = bot
-        self.db = open_db(NEWS_DB)
-        self._initialize_db()
-        self.running_tasks = {}  # Track running tasks by ID
-        self.check_tasks.start()  # Start the periodic task
+        super().__init__(bot, NEWS_DB)
 
-    def _initialize_db(self):
-        """Initialize the SQLite database with required tables."""
+    def _initialize_extra_tables(self):
+        """News-specific tables (scheduled_tasks lives in the base)."""
         cursor = self.db.cursor()
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -44,74 +40,6 @@ class NewsAgent(commands.Cog):
             FOREIGN KEY (user_id) REFERENCES users (user_id)
         )
         """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS scheduled_tasks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_name TEXT NOT NULL,
-                interval INTEGER NOT NULL,
-                last_run TIMESTAMP,
-                status TEXT NOT NULL,
-                user_id INTEGER NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users (user_id)
-        )
-        """)
-        self.db.commit()
-
-    async def cog_unload(self):
-        self.check_tasks.cancel()  # Stop the periodic task when the cog is unloaded
-        for task in list(self.running_tasks.values()):
-            task.cancel()
-        self.running_tasks.clear()
-
-    async def start_task(self, task_id: int, task_name: str, interval: int):
-        """Start a task and update its status in the database."""
-        logger.info("In start_task")
-        interval = max(5, interval)
-        sleep_s = interval * 60
-
-        async def task_runner():
-            # Sleep first: running immediately re-posted the full digest on
-            # every restart even if it ran minutes before shutdown.
-            while True:
-                await asyncio.sleep(sleep_s)
-                try:
-                    await self.execute_task_logic(task_id, task_name)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.exception(
-                        "Task run failed (id=%s, name=%s)", task_id, task_name
-                    )  # Wait for the next interval
-
-        # Start the task and store it in the running_tasks dictionary
-        task = asyncio.create_task(task_runner())
-        self.running_tasks[task_id] = task
-
-        # Update the task's status in the database
-        self.update_task(task_id, status="running")
-
-    def reset_tasks_to_pending(self):
-        """
-        Resets all tasks in the database to 'pending' status.
-        This should be called when the bot starts to ensure tasks are restarted.
-        """
-        cursor = self.db.cursor()
-        try:
-            cursor.execute(
-                "UPDATE scheduled_tasks SET status = 'pending' WHERE status = 'running'"
-            )
-            self.db.commit()
-            logger.info("All running tasks have been reset to 'pending'.")
-        except Exception as e:
-            logger.error(f"Error resetting tasks to pending: {e}")
-
-    async def stop_task(self, task_id: int):
-        """Stop a running task and update its status in the database."""
-        logger.info("In stop task")
-        if task_id in self.running_tasks:
-            self.running_tasks[task_id].cancel()
-            del self.running_tasks[task_id]
-            self.update_task(task_id, status="stopped")
 
     async def execute_task_logic(self, task_id: int, task_name: str):
         logger.info(f"Executing task {task_name} (ID: {task_id})")
@@ -137,23 +65,6 @@ class NewsAgent(commands.Cog):
             task_name, summarized_response, response, weather_embed
         )
         self.update_task(task_id, last_run=datetime.datetime.now(), status="running")
-
-    def get_user_id(self, task_id: int, task_name: str) -> Optional[int]:
-        cursor = self.db.cursor()
-        cursor.execute(
-            "SELECT user_id FROM scheduled_tasks WHERE id = ?",
-            (task_id,),
-        )
-        user_id_row = cursor.fetchone()
-        logger.debug(f"user_id_row: {user_id_row}")
-
-        if not user_id_row:
-            logger.warning(f"No user found for task {task_name} (ID: {task_id}).")
-            return None
-
-        user_id = user_id_row[0]
-        logger.debug(f"user_id: {user_id}")
-        return user_id
 
     async def get_user_preferences(self, user_id: int) -> List[Tuple[str, str]]:
         cursor = self.db.cursor()
@@ -223,83 +134,6 @@ class NewsAgent(commands.Cog):
         else:
             logger.error(f"Channel with ID {CHAT_CHANNEL_ID} not found.")
 
-    @tasks.loop(minutes=1)
-    async def check_tasks(self):
-        """Check the database for scheduled tasks and ensure they are running."""
-        # logger.info("Checking for tasks to start or stop.")
-        cursor = self.db.cursor()
-        cursor.execute("SELECT id, task_name, interval, status FROM scheduled_tasks")
-        scheduled_tasks = cursor.fetchall()
-
-        for task_id, task_name, interval, status in scheduled_tasks:
-            # Reap dead runners so the watchdog can restart them
-            runner = self.running_tasks.get(task_id)
-            if runner and runner.done():
-                del self.running_tasks[task_id]
-                if not runner.cancelled() and runner.exception():
-                    logger.error(
-                        "Task runner died (id=%s, name=%s): %r",
-                        task_id,
-                        task_name,
-                        runner.exception(),
-                    )
-                self.update_task(task_id, status="pending")
-            if status != "running" and task_id not in self.running_tasks:
-                try:
-                    logger.info(f"Starting task: {task_name} (ID: {task_id})")
-                    await self.start_task(task_id, task_name, interval)
-                except Exception as e:
-                    logger.error(
-                        f"Failed to start task {task_name} (ID: {task_id}): {e}"
-                    )
-
-        # Stop tasks that are no longer in the database
-        running_task_ids = set(self.running_tasks.keys())
-        db_task_ids = {task[0] for task in scheduled_tasks}
-        for task_id in running_task_ids - db_task_ids:
-            logger.info(f"Stopping task with ID: {task_id}")
-            await self.stop_task(task_id)
-
-    @check_tasks.before_loop
-    async def before_check_tasks(self):
-        logger.info("In before_check")
-        self.reset_tasks_to_pending()  # Reset tasks to 'pending' on bot startup
-        await self.bot.wait_until_ready()
-
-    def add_task(
-        self, user_id: int, task_name: str, interval: int, status: str = "pending"
-    ):
-        """Add a new scheduled task to the database."""
-        cursor = self.db.cursor()
-        cursor.execute(
-            """
-            INSERT INTO scheduled_tasks (user_id, task_name, interval, status)
-            VALUES (?, ?, ?, ?)
-            """,
-            (user_id, task_name, interval, status),
-        )
-        self.db.commit()
-
-    def remove_task(self, task_id: int):
-        """Remove a scheduled task from the database."""
-        cursor = self.db.cursor()
-        cursor.execute("DELETE FROM scheduled_tasks WHERE id = ?", (task_id,))
-        self.db.commit()
-
-    def update_task(self, task_id: int, last_run=None, status=None):
-        """Update the status or last_run of a scheduled task."""
-        cursor = self.db.cursor()
-        if last_run:
-            cursor.execute(
-                "UPDATE scheduled_tasks SET last_run = ? WHERE id = ?",
-                (last_run, task_id),
-            )
-        if status:
-            cursor.execute(
-                "UPDATE scheduled_tasks SET status = ? WHERE id = ?", (status, task_id)
-            )
-        self.db.commit()
-
     @commands.command(name="add_task")
     async def add_task_command(self, ctx, task_name: str, interval: int):
         """Add a new scheduled task to the database. format: <name>:str <interval>:int(in minutes)"""
@@ -361,11 +195,7 @@ class NewsAgent(commands.Cog):
     @commands.command(name="list_tasks")
     async def list_tasks_command(self, ctx):
         """List all scheduled tasks."""
-        cursor = self.db.cursor()
-        cursor.execute(
-            "SELECT id, task_name, interval, last_run, status, user_id FROM scheduled_tasks"
-        )
-        tasks = cursor.fetchall()
+        tasks = self.list_task_rows()
 
         if tasks:
             response = "\n".join(

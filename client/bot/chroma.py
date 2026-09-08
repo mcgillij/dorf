@@ -1,5 +1,6 @@
 from typing import Dict, List
 import re
+import time
 import logging
 import asyncio
 from pathlib import Path
@@ -32,6 +33,36 @@ def summarize_text(text: str, max_sentences: int = 5) -> str:
         f"- {sentence.strip()}" for sentence in summary_sentences if sentence.strip()
     )
     return summary
+
+
+async def sweep_old_documents(max_age_days: int = 90) -> int:
+    """Delete stored article documents older than max_age_days.
+
+    searxng_search upserts the FULL extracted article text per URL forever;
+    this bounds the vector store. Requires the 'stored_at' metadata the
+    upsert now writes — pre-existing entries without it are skipped (their
+    age is unknowable).
+
+    Returns the number of documents deleted. Runs the blocking calls off
+    the event loop.
+    """
+    cutoff = time.time() - max_age_days * 86400.0
+
+    def _sweep() -> int:
+        found = collection.get(where={"stored_at": {"$lt": cutoff}})
+        ids = found.get("ids") or []
+        if ids:
+            collection.delete(ids=ids)
+        return len(ids)
+
+    try:
+        deleted = await asyncio.to_thread(_sweep)
+        if deleted:
+            logger.info("chroma.sweep_done deleted=%s max_age_days=%s", deleted, max_age_days)
+        return deleted
+    except Exception:
+        logger.exception("chroma.sweep_failed")
+        return 0
 
 
 async def query_chromadb(q: str, top_k: int = 5) -> List[Dict]:

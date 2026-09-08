@@ -1,6 +1,9 @@
 extends Control
 
 @export var http: AwaitableHTTPRequest
+# Dedicated node for the 0.5s avatar-state poll: sharing one HTTPRequest with
+# query requests made sends fail with ERR_BUSY whenever a poll was mid-flight.
+@export var state_http: AwaitableHTTPRequest
 
 @onready var dorf: AnimatedSprite2D = %dorf
 @onready var timer: Timer = $Timer
@@ -12,37 +15,48 @@ var dorf_idle := load("res://assets/images/dorf.png")
 var dorf_talking := load("res://assets/images/dorf_talking.png")
 var dorf_thinking := load("res://assets/images/dorf_thinking.png")
 
-var db: SQLite
 var time_accumulator: float = 0.0
+# Last known avatar state; kept on failed polls so a transient api outage
+# doesn't snap the pet back to idle.
+var current_state := "idle"
 
 func _ready() -> void:
 	# Endpoint/token come from the environment so the pet can point at a
-	# remote api (exported builds no longer hardcode localhost).
+	# remote api (exported builds no longer hardcode localhost). :8100 —
+	# :8000 is taken by the godot-ai MCP server in this environment.
 	fastapi_endpoint = OS.get_environment("DORF_API_URL")
 	if fastapi_endpoint.is_empty():
-		fastapi_endpoint = "http://localhost:8000"
+		fastapi_endpoint = "http://localhost:8100"
 	fastapi_endpoint = fastapi_endpoint.trim_suffix("/")
 	api_token = OS.get_environment("DORF_API_TOKEN")
-	db = SQLite.new()
-	db.path = "res://client/avatar_state.db"
-	db.open_db()
 	connect_signals()
 	$Timer.timeout.connect(back_to_idle)
 	$Timer.start()
 
-func get_state() -> String:
-	# id DESC mirrors the bot side (statemanager.py): CURRENT_TIMESTAMP has
-	# 1s resolution so same-second writes tie arbitrarily under updated_at.
-	db.query("SELECT state FROM avatar_state ORDER BY id DESC LIMIT 1")
-	var d: Array = db.query_result
-	# Empty result = fresh clone / exported PCK (the .db isn't packed).
-	# Fail soft to idle instead of erroring every 0.5s in _process.
-	if d.is_empty() or d[0] == null or not d[0].has("state"):
-		return "idle"
-	return str(d[0]["state"])
+func _wait_http_ready(node: AwaitableHTTPRequest, timeout_s := 2.0) -> bool:
+	# The addon rejects overlapping requests on the same node (ERR_BUSY);
+	# wait briefly instead of failing the user's send.
+	var deadline := Time.get_ticks_msec() + int(timeout_s * 1000.0)
+	while node.is_requesting:
+		if Time.get_ticks_msec() >= deadline:
+			return false
+		await get_tree().process_frame
+	return true
 
-func state_machine() -> void:
-	var state := get_state()
+func _poll_state() -> void:
+	# The poll just skips a tick when its own node is busy.
+	if state_http.is_requesting:
+		return
+	var resp := await state_http.async_request(
+		fastapi_endpoint + "/api/avatar_state", _api_headers()
+	)
+	if resp.success() and resp.status_ok():
+		var body: Variant = resp.body_as_json()
+		if body is Dictionary and body.has("state"):
+			current_state = str(body["state"])
+	state_machine(current_state)
+
+func state_machine(state: String) -> void:
 	match state:
 		"idle":
 			dorf.play(&"idle")
@@ -61,7 +75,7 @@ func _process(delta: float) -> void:
 	time_accumulator += delta
 	if time_accumulator >= 0.5:
 		time_accumulator = 0.0
-		state_machine()
+		_poll_state()
 
 func back_to_idle():
 	dorf.play(&"idle")
@@ -93,11 +107,15 @@ func _on_input_window_send(query: String) -> void:
 	if text_response.is_empty() or not text_response.has("response"):
 		_show_send_error("dorf api: no response (is the bot process running?)")
 		return
-	print_debug(text_response)
+	# Surface the answer in the pet's window — it used to be write-only.
+	$TextInputWindow.show_response(str(text_response["response"]))
 	dorf.play(&"talking")
 	$Timer.start()  # Restart the timer for next poll
 
 func do_http_get_unique_id(unique_id: String) -> Dictionary:
+	if not await _wait_http_ready(http):
+		_show_send_error("dorf api: request channel busy, try again")
+		return {}
 	var data = {
 		"unique_id": unique_id
 	}
@@ -115,6 +133,8 @@ func do_http_get_unique_id(unique_id: String) -> Dictionary:
 	return {}
 
 func do_http_query(query: String) -> Dictionary:
+	if not await _wait_http_ready(http):
+		return {}
 	var data = {
 		"query": query
 	}

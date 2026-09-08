@@ -41,13 +41,17 @@ animations = [{
 "speed": 5.0
 }]
 
-[node name="Bot" type="Control" node_paths=PackedStringArray("http")]
+[node name="Bot" type="Control" node_paths=PackedStringArray("http", "state_http")]
 layout_mode = 3
 anchors_preset = 0
 script = ExtResource("1_6e6p7")
 http = NodePath("AwaitableHTTPRequest")
+state_http = NodePath("StatePoll")
 
 [node name="AwaitableHTTPRequest" type="HTTPRequest" parent="."]
+script = ExtResource("2_noa4f")
+
+[node name="StatePoll" type="HTTPRequest" parent="."]
 script = ExtResource("2_noa4f")
 
 [node name="TextInputWindow" parent="." instance=ExtResource("2_4qqjq")]

@@ -1,7 +1,7 @@
 import sqlite3
 import logging
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,28 @@ def ensure_sqlite_pragmas(paths=SQLITE_FILES) -> None:
                 logger.info("sqlite pragmas applied: %s", path)
         except Exception:
             logger.exception("sqlite pragma setup failed for %s", path)
+
+
+def sweep_voice_responses(path: str = "voice_responses.db", max_age_days: int = 30) -> int:
+    """Prune transcript history older than max_age_days. Returns rows deleted.
+
+    voice_responses.db grows one row per transcribed utterance forever; this
+    is called from the whisper worker's hourly retention sweep. The datetime
+    column is UTC 'YYYY-MM-DD HH:MM:SS' strings — lexical comparison is exact.
+    """
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with closing(open_db(path)) as conn:
+            cursor = conn.execute(
+                "DELETE FROM voice_responses WHERE datetime < ?", (cutoff,)
+            )
+            conn.commit()
+            return cursor.rowcount if cursor.rowcount > 0 else 0
+    except Exception:
+        logger.exception("voice_responses sweep failed for %s", path)
+        return 0
 
 
 class SQLiteDB:

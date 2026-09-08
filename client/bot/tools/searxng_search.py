@@ -1,4 +1,5 @@
 import json
+import time
 import aiohttp
 from typing import List, Dict
 import asyncio
@@ -89,7 +90,16 @@ async def search_internet(q: str, callback=None) -> List[Dict]:
                                 await asyncio.to_thread(
                                     collection.upsert,
                                     documents=[extracted_content],
-                                    metadatas=[{"source_url": url, "title": title}],
+                                    metadatas=[
+                                        {
+                                            "source_url": url,
+                                            "title": title,
+                                            # Unix ts — the retention sweeper
+                                            # (chroma.sweep_old_documents)
+                                            # prunes on this.
+                                            "stored_at": time.time(),
+                                        }
+                                    ],
                                     ids=[url],  # Using URL as a unique ID
                                 )
                             except Exception:

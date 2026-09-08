@@ -1,3 +1,5 @@
+import asyncio
+import json
 import logging
 import time
 
@@ -5,7 +7,8 @@ import dice
 import discord
 from discord.ext import commands
 from bot.utilities import get_random_image_path, split_message
-from bot.constants import FRIEREN_DIR
+from bot.constants import FRIEREN_DIR, WHISPER_DEAD_QUEUE, VOICE_RESPONSE_DEAD_QUEUE
+from bot.redis_client import redis_client
 from rapidfuzz import fuzz
 
 logger = logging.getLogger(__name__)
@@ -31,6 +34,39 @@ class MiscCog(commands.Cog):
         text = "Available commands:\n" + "\n".join(command_details)
         for chunk in split_message(text):
             await ctx.send(chunk)
+
+    @commands.command(name="deadletters")
+    @commands.has_permissions(manage_messages=True)
+    async def deadletters(self, ctx):
+        """Admin: inspect the dead-letter queues (failed STT/voice jobs).
+        They used to be write-only — postmortems meant digging through Redis."""
+
+        def _snapshot():
+            out = []
+            for name, queue in (
+                ("whisper (STT)", WHISPER_DEAD_QUEUE),
+                ("voice (TTS/playback)", VOICE_RESPONSE_DEAD_QUEUE),
+            ):
+                depth = redis_client.llen(queue)
+                samples = redis_client.lrange(queue, 0, 4)
+                out.append((name, depth, samples))
+            return out
+
+        lines = []
+        for name, depth, samples in await asyncio.to_thread(_snapshot):
+            lines.append(f"**{name}**: {depth} dead job(s)")
+            for raw in samples:
+                try:
+                    job = json.loads(raw)
+                except ValueError:
+                    lines.append(f"> `{str(raw)[:80]}`")
+                    continue
+                lines.append(
+                    f"> `{str(job.get('trace_id') or job.get('unique_id') or '?')[:12]}` "
+                    f"reason={job.get('dead_reason', '?')} "
+                    f"attempts={job.get('attempt', '?')}"
+                )
+        await ctx.send("\n".join(lines))
 
     @commands.command()
     async def uptime(self, ctx):

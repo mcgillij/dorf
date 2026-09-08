@@ -150,6 +150,11 @@ async def process_response_queue(
                 audio_queue_name,
             )
 
+            # The pet mirrors this as "thinking" while the LLM + TTS run;
+            # playback_worker flips it to talking when audio actually plays.
+            if bot_instance.statemanager:
+                await asyncio.to_thread(bot_instance.statemanager.update_state_thinking)
+
             try:
                 await run_unified_response_pipeline(
                     bot_instance=bot_instance,
@@ -176,12 +181,22 @@ async def process_response_queue(
                     # instead of re-run.
                     progress=data,
                 )
+                # TTS was enqueued -> playback_worker drives talking/idle.
+                # Otherwise nothing else will reset the state.
+                if not data.get("tts_enqueued") and bot_instance.statemanager:
+                    await asyncio.to_thread(
+                        bot_instance.statemanager.update_state_idle
+                    )
             except Exception as e:
                 # LLMRequestError and other pipeline failures requeue the item
                 # (with a cap) instead of dropping it.
                 logger.exception(
                     "voice_pipeline.failed queue=%s error=%s", queue_name, e
                 )
+                if bot_instance.statemanager:
+                    await asyncio.to_thread(
+                        bot_instance.statemanager.update_state_idle
+                    )
                 await requeue_or_deadletter(data, attempt, f"pipeline_error: {e}")
 
         except Exception as e:
