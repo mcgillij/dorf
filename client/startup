@@ -16,7 +16,8 @@ live_pid() {
 }
 
 # Redis (docker compose: persistent volume + restart policy)
-docker compose up -d
+docker compose up -d redis || exit $?
+bash scripts/whisper-up.sh || exit $?
 
 # Mirror container logs to files so `just up-logs` can tail everything with
 # one process. pgrep guards keep restarts from duplicating the followers.
@@ -29,28 +30,6 @@ if ! live_pid "[c]ompose logs -f.*redis"; then
 fi
 if ! live_pid "[d]ocker logs -f.*derf-whisper"; then
   nohup setsid docker logs -f --tail 20 derf-whisper >> logs/whisper_server.log 2>&1 < /dev/null &
-fi
-
-# Whisper STT server (ROCm). Start only if nothing is already listening on 8080.
-# One-time model download into ./models:
-#   mkdir -p models
-#   docker run --rm -v "$PWD/models:/models" ghcr.io/ggerganov/whisper.cpp:main \
-#     /bin/sh -c "cd /app/models && ./download-ggml-model.sh base.en && cp ggml-base.en.bin /models/"
-if ! curl -s -o /dev/null --max-time 2 http://127.0.0.1:8080/; then
-  docker rm -f derf-whisper 2>/dev/null
-  # Hardened vs the original: SYS_PTRACE and seccomp=unconfined dropped.
-  # --network=host stays: the server binds 127.0.0.1 by default (verified
-  # never LAN-reachable), and passing explicit --host/--port makes this
-  # build fail to bind ("couldn't bind to server socket"). --ipc=host
-  # stays: ROCm fails to allocate GPU memory without it.
-  # --restart unless-stopped: a host reboot used to leave STT down while
-  # redis (compose) came back on its own.
-  docker run -d --name derf-whisper --network=host \
-    --restart unless-stopped \
-    --device=/dev/kfd --device=/dev/dri --group-add=video --ipc=host \
-    -v "$PWD/models:/models" \
-    ghcr.io/ggerganov/whisper.cpp@sha256:13d0e7c873c59a262dca621b57ad28de40e9927ac883d936dfd8459142c90db4 \
-    /app/build/bin/whisper-server -m /models/ggml-base.en.bin
 fi
 
 # dorf api (FastAPI shim the Godot pet talks to). Runs on :8100 — :8000 is

@@ -3,12 +3,7 @@
 
 set shell := ["bash", "-uc"]
 
-# Pinned by digest: the floating :main tag silently changed STT behavior
-# once. To bump: docker pull the tag, read `docker image inspect <tag>
-# --format '{{json .RepoDigests}}'`, and update this line.
-whisper_image := "ghcr.io/ggerganov/whisper.cpp@sha256:13d0e7c873c59a262dca621b57ad28de40e9927ac883d936dfd8459142c90db4"
 whisper_model := "models/ggml-base.en.bin"
-whisper_container := "derf-whisper"
 
 # List all tasks
 @default:
@@ -38,39 +33,30 @@ test-api:
 
 # Pull redis + whisper.cpp images
 pull:
-    docker compose pull redis
-    docker pull {{whisper_image}}
+    docker compose pull redis whisper
 
 # Start redis (persistent volume)
 redis-up:
-    docker compose up -d
+    docker compose up -d redis
 
 # Stop redis
 redis-down:
-    docker compose down
+    docker compose stop redis
 
 # One-time: download the whisper model (~148MB) into ./models
 @model:
     mkdir -p models
     test -f {{whisper_model}} || \
-    docker run --rm -v "$PWD/models:/models" {{whisper_image}} \
+    docker compose run --rm --no-deps whisper \
       /bin/sh -c "cd /app/models && ./download-ggml-model.sh base.en && cp ggml-base.en.bin /models/"
 
-# Start the whisper.cpp STT server on :8080 (ROCm), only if not already up
+# Start or update the whisper.cpp STT server on :9191 (ROCm)
 @whisper-up:
-    if curl -s -o /dev/null --max-time 2 http://127.0.0.1:8080/; then \
-      echo "whisper server already listening on :8080"; exit 0; fi
-    docker rm -f {{whisper_container}} 2>/dev/null || true
-    docker run -d --name {{whisper_container}} --network=host \
-      --device=/dev/kfd --device=/dev/dri --group-add=video --ipc=host \
-      --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
-      -v "$PWD/models:/models" \
-      {{whisper_image}} \
-      /app/build/bin/whisper-server -m /models/ggml-base.en.bin
+    bash scripts/whisper-up.sh
 
 # Stop the whisper.cpp server
 @whisper-down:
-    docker rm -f {{whisper_container}} 2>/dev/null || true
+    docker compose stop whisper
 
 # Run the whisper worker (STT queue consumer) in the foreground
 whisper-worker:
@@ -113,7 +99,7 @@ restart: stop && up
 # Sanity check the stack: redis, whisper server, model file
 @check:
     @echo -n "redis:     "; poetry run python -c "from bot.redis_client import redis_client; print('OK' if redis_client.ping() else 'FAIL')" 2>/dev/null || echo "FAIL"
-    @echo -n "whisper :  "; curl -s -o /dev/null --max-time 2 http://127.0.0.1:8080/ && echo "OK (:8080)" || echo "FAIL (:8080)"
+    @echo -n "whisper :  "; curl -s -o /dev/null --max-time 2 http://127.0.0.1:9191/ && echo "OK (:9191)" || echo "FAIL (:9191)"
     @echo -n "model:     "; test -f {{whisper_model}} && echo "OK" || echo "MISSING (run: just model)"
     @echo -n "bot proc:  "; pgrep -af "[d]erfbot.py" > /dev/null && echo "running" || echo "not running"
     @echo -n "worker:    "; pgrep -af "[w]hisper_worker.py" > /dev/null && echo "running" || echo "not running"

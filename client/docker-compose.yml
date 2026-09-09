@@ -9,5 +9,24 @@ services:
       - redis-data:/data
     restart: unless-stopped
 
+  whisper:
+    # Keep the image pinned: floating tags have changed STT behavior.
+    image: ghcr.io/ggerganov/whisper.cpp@sha256:13d0e7c873c59a262dca621b57ad28de40e9927ac883d936dfd8459142c90db4
+    container_name: derf-whisper
+    # Override bash -c in the image so server arguments reach the binary.
+    entrypoint: []
+    # The explicit loopback host keeps access local; ROCm needs host IPC.
+    network_mode: host
+    ipc: host
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+    volumes:
+      - ./models:/models
+    command: /app/build/bin/whisper-server -m /models/ggml-base.en.bin --host 127.0.0.1 --port 9191
+    restart: unless-stopped
+
 volumes:
   redis-data:

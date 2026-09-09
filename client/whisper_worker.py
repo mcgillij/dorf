@@ -168,7 +168,7 @@ def _wav_info(path: str) -> dict:
 class WhisperWorker:
     def __init__(self):
         # Tunables (env override friendly)
-        self._whisper_url = os.getenv("WHISPER_URL", "http://127.0.0.1:8080/inference")
+        self._whisper_url = os.getenv("WHISPER_URL", "http://127.0.0.1:9191/inference")
         self._max_attempts = int(os.getenv("WHISPER_MAX_ATTEMPTS", "5"))
         self._retry_backoff_s = float(os.getenv("WHISPER_RETRY_BACKOFF_S", "1.0"))
         # How long a follow-up stays with the bot that answered the last
